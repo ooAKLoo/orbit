@@ -20,7 +20,7 @@ export interface OrbitConfig {
 
 // Endpoints
 const ENDPOINT_GLOBAL = 'https://orbit-api.yangdongjuooakloo.workers.dev';
-const ENDPOINT_CHINA = 'https://1301188123-brbe5eqc8o.ap-shanghai.tencentscf.com';
+const ENDPOINT_CHINA = 'https://1301188123-5qkxnan435.ap-hongkong.tencentscf.com';
 
 export interface UpdateInfo {
   hasUpdate: boolean;

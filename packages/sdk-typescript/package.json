@@ -1,6 +1,6 @@
 {
   "name": "@ooakloowj/orbit",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Lightweight analytics SDK for Electron/Tauri apps - auto-track downloads, DAU, and retention",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
