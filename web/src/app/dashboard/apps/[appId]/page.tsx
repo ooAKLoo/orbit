@@ -1,11 +1,11 @@
 'use client';
 
 import { useApp } from '@/lib/app-context';
-import { Copy, Key, Check, ArrowLeft, Trash2, Plus, Package, Loader2, X } from 'lucide-react';
+import { Copy, Key, Check, ArrowLeft, Trash2, Plus, Package, Loader2, X, Github, RefreshCw } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { getAppVersions, createVersion, Version } from '@/lib/api';
+import { getAppVersions, createVersion, updateApp, syncGitHubReleases, Version } from '@/lib/api';
 
 type Platform = 'swift' | 'kotlin' | 'typescript';
 
@@ -19,8 +19,19 @@ export default function AppDetailPage() {
   const [isLoadingVersions, setIsLoadingVersions] = useState(true);
   const [showNewVersionModal, setShowNewVersionModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [githubRepo, setGithubRepo] = useState('');
+  const [isEditingRepo, setIsEditingRepo] = useState(false);
+  const [isSavingRepo, setIsSavingRepo] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const app = apps.find((a) => a.app_id === params.appId);
+
+  // Initialize github repo from app
+  useEffect(() => {
+    if (app?.github_repo) {
+      setGithubRepo(app.github_repo);
+    }
+  }, [app?.github_repo]);
 
   // Fetch versions
   useEffect(() => {
@@ -54,6 +65,52 @@ export default function AppDetailPage() {
       alert('删除失败，请重试');
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleSaveRepo = async () => {
+    if (!app) return;
+
+    setIsSavingRepo(true);
+    try {
+      // Extract owner/repo from GitHub URL if needed
+      let repoPath = githubRepo.trim();
+      if (repoPath.includes('github.com/')) {
+        const match = repoPath.match(/github\.com\/([^\/]+\/[^\/]+)/);
+        if (match) {
+          repoPath = match[1].replace(/\.git$/, '');
+        }
+      }
+
+      await updateApp(app.app_id, { github_repo: repoPath || null });
+      setIsEditingRepo(false);
+    } catch (err) {
+      console.error('Failed to save repo:', err);
+      alert('保存失败，请重试');
+    } finally {
+      setIsSavingRepo(false);
+    }
+  };
+
+  const handleSyncGitHub = async () => {
+    if (!app) return;
+
+    setIsSyncing(true);
+    try {
+      const result = await syncGitHubReleases(app.app_id);
+      // Refresh versions
+      const data = await getAppVersions(app.app_id);
+      setVersions(data);
+      if (result.synced > 0) {
+        alert(`成功同步 ${result.synced} 个新版本`);
+      } else {
+        alert('没有新版本需要同步');
+      }
+    } catch (err) {
+      console.error('Failed to sync:', err);
+      alert('同步失败，请检查 GitHub 仓库地址是否正确');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -243,6 +300,73 @@ await Orbit.sendFeedback({
                 {copiedId === 'app-id' ? '已复制' : '复制'}
               </button>
             </div>
+          </div>
+
+          {/* GitHub 仓库配置 */}
+          <div className="bg-white rounded-2xl p-6">
+            <div className="flex items-center gap-2 text-sm font-medium text-neutral-900 mb-3">
+              <Github className="w-4 h-4" />
+              <span>GitHub 仓库</span>
+            </div>
+            <p className="text-sm text-neutral-500 mb-3">
+              配置后可自动同步 GitHub Releases 作为版本（每小时自动同步）
+            </p>
+            {isEditingRepo || !app.github_repo ? (
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={githubRepo}
+                  onChange={(e) => setGithubRepo(e.target.value)}
+                  placeholder="owner/repo 或 https://github.com/owner/repo"
+                  className="w-full px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveRepo}
+                    disabled={isSavingRepo}
+                    className="px-4 py-2 bg-neutral-900 text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isSavingRepo && <Loader2 className="w-4 h-4 animate-spin" />}
+                    保存
+                  </button>
+                  {app.github_repo && (
+                    <button
+                      onClick={() => {
+                        setGithubRepo(app.github_repo || '');
+                        setIsEditingRepo(false);
+                      }}
+                      className="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900"
+                    >
+                      取消
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm font-mono text-neutral-600 truncate">
+                  {app.github_repo}
+                </code>
+                <button
+                  onClick={() => setIsEditingRepo(true)}
+                  className="px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm text-neutral-600 hover:text-neutral-900 transition-colors shrink-0"
+                >
+                  编辑
+                </button>
+                <button
+                  onClick={handleSyncGitHub}
+                  disabled={isSyncing}
+                  className="px-4 py-3 bg-neutral-900 text-white rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50 flex items-center gap-2 shrink-0"
+                >
+                  {isSyncing ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4" />
+                  )}
+                  同步
+                </button>
+              </div>
+            )}
           </div>
 
           {/* 版本管理 */}

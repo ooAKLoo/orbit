@@ -12,9 +12,15 @@
 export interface OrbitConfig {
   appId: string;
   endpoint?: string;
+  /** Force use China endpoint (Tencent Cloud Function) */
+  forceChina?: boolean;
   enableLogging?: boolean;
   flushInterval?: number;
 }
+
+// Endpoints
+const ENDPOINT_GLOBAL = 'https://orbit-api.yangdongjuooakloo.workers.dev';
+const ENDPOINT_CHINA = 'https://1301188123-brbe5eqc8o.ap-shanghai.tencentscf.com';
 
 export interface UpdateInfo {
   hasUpdate: boolean;
@@ -82,7 +88,7 @@ class Storage {
 
 class OrbitSDK {
   private appId: string | null = null;
-  private endpoint = 'https://orbit-api.yangdongjuooakloo.workers.dev';
+  private endpoint = ENDPOINT_GLOBAL;
   private distinctId: string | null = null;
   private enableLogging = false;
   private storage = new Storage();
@@ -108,8 +114,18 @@ class OrbitSDK {
     }
 
     this.appId = config.appId;
-    this.endpoint = config.endpoint ?? this.endpoint;
     this.enableLogging = config.enableLogging ?? false;
+
+    // Determine endpoint: explicit > forceChina > auto-detect
+    if (config.endpoint) {
+      this.endpoint = config.endpoint;
+    } else if (config.forceChina) {
+      this.endpoint = ENDPOINT_CHINA;
+    } else {
+      this.endpoint = this.detectEndpoint();
+    }
+
+    this.log(`Using endpoint: ${this.endpoint}`);
 
     // Get or create device ID
     this.distinctId = this.getOrCreateDistinctId();
@@ -369,6 +385,27 @@ class OrbitSDK {
 
     // 3. Fallback
     return 'unknown';
+  }
+
+  /**
+   * Detect if running in China and choose appropriate endpoint.
+   * Uses timezone as the only heuristic (Asia/Shanghai = China mainland).
+   * Language is not used because overseas Chinese may use zh-CN.
+   */
+  private detectEndpoint(): string {
+    try {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      // Only Asia/Shanghai and Asia/Chongqing are used in mainland China
+      // Hong Kong (Asia/Hong_Kong), Taiwan (Asia/Taipei), Singapore (Asia/Singapore) use global endpoint
+      if (timezone === 'Asia/Shanghai' || timezone === 'Asia/Chongqing') {
+        this.log('Detected China timezone, using China endpoint');
+        return ENDPOINT_CHINA;
+      }
+    } catch {
+      // Ignore detection errors
+    }
+
+    return ENDPOINT_GLOBAL;
   }
 
   private log(...args: unknown[]): void {

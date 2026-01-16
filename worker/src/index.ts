@@ -10,7 +10,7 @@ const DEFAULT_ADMIN_KEY = 'orbit-admin-secret-key';
 // CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Admin-Key',
 };
 
@@ -71,7 +71,68 @@ export default {
       return errorResponse('Internal server error', 500);
     }
   },
+
+  // Cron Trigger - Sync GitHub Releases hourly
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    console.log('Cron triggered: syncing GitHub releases...');
+
+    // Get all apps with github_repo configured
+    const apps = await env.DB.prepare(`
+      SELECT app_id, github_repo FROM applications WHERE github_repo IS NOT NULL
+    `).all<{ app_id: string; github_repo: string }>();
+
+    if (!apps.results || apps.results.length === 0) {
+      console.log('No apps with GitHub repos configured');
+      return;
+    }
+
+    for (const app of apps.results) {
+      try {
+        await syncAppGitHubReleases(env, app.app_id, app.github_repo);
+        console.log(`Synced releases for ${app.app_id}`);
+      } catch (error) {
+        console.error(`Failed to sync ${app.app_id}:`, error);
+      }
+    }
+  },
 };
+
+// Shared sync function for both cron and manual trigger
+async function syncAppGitHubReleases(env: Env, appId: string, githubRepo: string): Promise<number> {
+  const releases = await fetchGitHubReleases(githubRepo);
+
+  if (!releases || releases.length === 0) {
+    return 0;
+  }
+
+  let synced = 0;
+
+  for (const release of releases) {
+    if (release.draft || release.prerelease) continue;
+
+    const version = release.tag_name.replace(/^v/, '');
+    const platforms = detectPlatformsFromAssets(release.assets);
+
+    for (const platform of platforms) {
+      const existing = await env.DB.prepare(`
+        SELECT id FROM versions WHERE app_id = ? AND version = ? AND platform = ?
+      `).bind(appId, version, platform).first();
+
+      if (existing) continue;
+
+      const downloadUrl = findDownloadUrl(release.assets, platform) || release.html_url;
+
+      await env.DB.prepare(`
+        INSERT INTO versions (app_id, platform, version, version_code, download_url, changelog, force_update)
+        VALUES (?, ?, ?, ?, ?, ?, 0)
+      `).bind(appId, platform, version, parseVersion(version), downloadUrl, release.body || null).run();
+
+      synced++;
+    }
+  }
+
+  return synced;
+}
 
 // ============ Client APIs ============
 
@@ -517,6 +578,15 @@ async function handleAdminAPI(request: Request, env: Env, path: string, url: URL
     if (request.method === 'DELETE') {
       return handleDeleteApp(env, appMatch[1]);
     }
+    if (request.method === 'PATCH') {
+      return handleUpdateApp(request, env, appMatch[1]);
+    }
+  }
+
+  // /admin/apps/{app_id}/sync-github
+  const syncMatch = endpoint.match(/^apps\/([^\/]+)\/sync-github$/);
+  if (syncMatch && request.method === 'POST') {
+    return handleSyncGitHub(env, syncMatch[1]);
   }
 
   return errorResponse('Not found', 404);
@@ -525,7 +595,7 @@ async function handleAdminAPI(request: Request, env: Env, path: string, url: URL
 // GET /admin/apps
 async function handleListApps(env: Env): Promise<Response> {
   const apps = await env.DB.prepare(`
-    SELECT id, app_id, app_name, api_key, created_at
+    SELECT id, app_id, app_name, api_key, github_repo, created_at
     FROM applications
     ORDER BY created_at DESC
   `).all();
@@ -571,7 +641,7 @@ async function handleCreateApp(request: Request, env: Env): Promise<Response> {
 // GET /admin/apps/{app_id}
 async function handleGetApp(env: Env, appId: string): Promise<Response> {
   const app = await env.DB.prepare(`
-    SELECT id, app_id, app_name, api_key, created_at
+    SELECT id, app_id, app_name, api_key, github_repo, created_at
     FROM applications
     WHERE app_id = ?
   `).bind(appId).first();
@@ -583,6 +653,39 @@ async function handleGetApp(env: Env, appId: string): Promise<Response> {
   return jsonResponse({ app });
 }
 
+// PATCH /admin/apps/{app_id}
+async function handleUpdateApp(request: Request, env: Env, appId: string): Promise<Response> {
+  const body = await request.json() as {
+    app_name?: string;
+    github_repo?: string | null;
+  };
+
+  const updates: string[] = [];
+  const values: (string | null)[] = [];
+
+  if (body.app_name !== undefined) {
+    updates.push('app_name = ?');
+    values.push(body.app_name);
+  }
+
+  if (body.github_repo !== undefined) {
+    updates.push('github_repo = ?');
+    values.push(body.github_repo);
+  }
+
+  if (updates.length === 0) {
+    return errorResponse('No fields to update');
+  }
+
+  values.push(appId);
+
+  await env.DB.prepare(`
+    UPDATE applications SET ${updates.join(', ')} WHERE app_id = ?
+  `).bind(...values).run();
+
+  return jsonResponse({ success: true });
+}
+
 // DELETE /admin/apps/{app_id}
 async function handleDeleteApp(env: Env, appId: string): Promise<Response> {
   // Delete related data first
@@ -592,6 +695,132 @@ async function handleDeleteApp(env: Env, appId: string): Promise<Response> {
   await env.DB.prepare('DELETE FROM applications WHERE app_id = ?').bind(appId).run();
 
   return jsonResponse({ success: true });
+}
+
+// POST /admin/apps/{app_id}/sync-github - Sync versions from GitHub Releases
+async function handleSyncGitHub(env: Env, appId: string): Promise<Response> {
+  // Get app with github_repo
+  const app = await env.DB.prepare('SELECT github_repo FROM applications WHERE app_id = ?')
+    .bind(appId)
+    .first<{ github_repo: string | null }>();
+
+  if (!app) {
+    return errorResponse('App not found', 404);
+  }
+
+  if (!app.github_repo) {
+    return errorResponse('No GitHub repository configured for this app');
+  }
+
+  const synced = await syncAppGitHubReleases(env, appId, app.github_repo);
+
+  return jsonResponse({ success: true, synced });
+}
+
+// Fetch releases from GitHub API
+async function fetchGitHubReleases(repo: string): Promise<GitHubRelease[] | null> {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=20`, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'Orbit-SDK',
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`GitHub API error: ${response.status}`);
+      return null;
+    }
+
+    return await response.json() as GitHubRelease[];
+  } catch (error) {
+    console.error('Failed to fetch GitHub releases:', error);
+    return null;
+  }
+}
+
+interface GitHubRelease {
+  tag_name: string;
+  name: string;
+  body: string | null;
+  draft: boolean;
+  prerelease: boolean;
+  html_url: string;
+  assets: GitHubAsset[];
+}
+
+interface GitHubAsset {
+  name: string;
+  browser_download_url: string;
+}
+
+// Detect platforms from release assets
+function detectPlatformsFromAssets(assets: GitHubAsset[]): string[] {
+  const platforms = new Set<string>();
+
+  for (const asset of assets) {
+    const name = asset.name.toLowerCase();
+
+    if (name.includes('mac') || name.includes('darwin') || name.endsWith('.dmg')) {
+      platforms.add('macos');
+    }
+    if (name.includes('win') || name.endsWith('.exe') || name.endsWith('.msi')) {
+      platforms.add('windows');
+    }
+    if (name.includes('linux') || name.endsWith('.appimage') || name.endsWith('.deb')) {
+      platforms.add('linux');
+    }
+    if (name.includes('ios') || name.endsWith('.ipa')) {
+      platforms.add('ios');
+    }
+    if (name.includes('android') || name.endsWith('.apk') || name.endsWith('.aab')) {
+      platforms.add('android');
+    }
+  }
+
+  // If no specific platform detected, mark as 'all'
+  if (platforms.size === 0) {
+    platforms.add('all');
+  }
+
+  return Array.from(platforms);
+}
+
+// Find download URL for specific platform
+function findDownloadUrl(assets: GitHubAsset[], platform: string): string | null {
+  for (const asset of assets) {
+    const name = asset.name.toLowerCase();
+
+    switch (platform) {
+      case 'macos':
+        if (name.includes('mac') || name.includes('darwin') || name.endsWith('.dmg')) {
+          return asset.browser_download_url;
+        }
+        break;
+      case 'windows':
+        if (name.includes('win') || name.endsWith('.exe') || name.endsWith('.msi')) {
+          return asset.browser_download_url;
+        }
+        break;
+      case 'linux':
+        if (name.includes('linux') || name.endsWith('.appimage') || name.endsWith('.deb')) {
+          return asset.browser_download_url;
+        }
+        break;
+      case 'ios':
+        if (name.includes('ios') || name.endsWith('.ipa')) {
+          return asset.browser_download_url;
+        }
+        break;
+      case 'android':
+        if (name.includes('android') || name.endsWith('.apk') || name.endsWith('.aab')) {
+          return asset.browser_download_url;
+        }
+        break;
+    }
+  }
+
+  return null;
 }
 
 // GET /admin/apps/{app_id}/stats

@@ -9,3 +9,7 @@ ENVIRONMENT = "production"
 binding = "DB"
 database_name = "orbit-db"
 database_id = "fc805556-44b0-4ac1-b94e-c6cf7eb83864"
+
+# Cron Trigger - Sync GitHub Releases hourly
+[triggers]
+crons = ["0 * * * *"]

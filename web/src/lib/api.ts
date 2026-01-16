@@ -9,6 +9,7 @@ export interface App {
   app_id: string;
   app_name: string;
   api_key: string;
+  github_repo?: string | null;
   created_at: number;
 }
 
@@ -156,5 +157,28 @@ export async function createVersion(
   await fetchApi(`/admin/apps/${appId}/versions`, {
     method: 'POST',
     body: JSON.stringify(version),
+  });
+}
+
+// ============ App Update API ============
+
+export async function updateApp(
+  appId: string,
+  updates: {
+    app_name?: string;
+    github_repo?: string | null;
+  }
+): Promise<void> {
+  await fetchApi(`/admin/apps/${appId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+}
+
+// ============ GitHub Sync API ============
+
+export async function syncGitHubReleases(appId: string): Promise<{ synced: number }> {
+  return fetchApi(`/admin/apps/${appId}/sync-github`, {
+    method: 'POST',
   });
 }
