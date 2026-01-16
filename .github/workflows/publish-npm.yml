@@ -1,13 +1,11 @@
 name: Publish to npm
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [master]
+    paths:
+      - 'packages/sdk-typescript/**'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to publish (e.g., 0.1.0)'
-        required: false
 
 jobs:
   publish:
@@ -32,7 +30,25 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check if version changed
+        id: version
+        run: |
+          LOCAL_VERSION=$(node -p "require('./package.json').version")
+          NPM_VERSION=$(npm view orbit-sdk version 2>/dev/null || echo "0.0.0")
+          echo "local=$LOCAL_VERSION" >> $GITHUB_OUTPUT
+          echo "npm=$NPM_VERSION" >> $GITHUB_OUTPUT
+          if [ "$LOCAL_VERSION" != "$NPM_VERSION" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Publish to npm
+        if: steps.version.outputs.changed == 'true'
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Skip publish (version unchanged)
+        if: steps.version.outputs.changed == 'false'
+        run: echo "Version ${{ steps.version.outputs.local }} already published, skipping"
