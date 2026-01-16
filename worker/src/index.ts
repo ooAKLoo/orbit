@@ -552,6 +552,14 @@ async function handleAdminAPI(request: Request, env: Env, path: string, url: URL
     return handleAppStats(request, env, statsMatch[1], url);
   }
 
+  // /admin/apps/{app_id}/feedbacks/{feedback_id}
+  const feedbackMatch = endpoint.match(/^apps\/([^\/]+)\/feedbacks\/(\d+)$/);
+  if (feedbackMatch) {
+    if (request.method === 'DELETE') {
+      return handleDeleteFeedback(env, feedbackMatch[1], parseInt(feedbackMatch[2]));
+    }
+  }
+
   // /admin/apps/{app_id}/feedbacks
   const feedbacksMatch = endpoint.match(/^apps\/([^\/]+)\/feedbacks$/);
   if (feedbacksMatch) {
@@ -902,6 +910,19 @@ async function handleAppStats(request: Request, env: Env, appId: string, url: UR
     },
     retention,
   });
+}
+
+// DELETE /admin/apps/{app_id}/feedbacks/{feedback_id}
+async function handleDeleteFeedback(env: Env, appId: string, feedbackId: number): Promise<Response> {
+  const result = await env.DB.prepare(
+    'DELETE FROM feedbacks WHERE id = ? AND app_id = ?'
+  ).bind(feedbackId, appId).run();
+
+  if (result.meta.changes === 0) {
+    return errorResponse('Feedback not found', 404);
+  }
+
+  return jsonResponse({ success: true });
 }
 
 // GET /admin/apps/{app_id}/feedbacks

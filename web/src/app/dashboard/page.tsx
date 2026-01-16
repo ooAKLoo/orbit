@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { Download, Users, RefreshCw, Mail, Clock, MessageSquare, Loader2 } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { Download, Users, RefreshCw, Loader2 } from 'lucide-react';
 import { StatsCard } from '@/components/stats-card';
 import { DailyChart, PlatformChart, RetentionChart } from '@/components/charts';
+import { FeedbackCard } from '@/components/feedback-card';
 import { DateFilter } from '@/components/date-filter';
 import { useApp } from '@/lib/app-context';
 import { getAppStats, getAppFeedbacks, AppStats, Feedback } from '@/lib/api';
@@ -16,6 +17,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<AppStats | null>(null);
   const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Get days from date range
@@ -28,32 +30,43 @@ export default function DashboardPage() {
     }
   }, [dateRange]);
 
-  // Fetch data when app or date range changes
-  useEffect(() => {
+  // Fetch data function
+  const fetchData = useCallback(async (showFullLoading = true) => {
     if (!selectedAppId) return;
 
-    const fetchData = async () => {
-      try {
+    try {
+      if (showFullLoading) {
         setIsLoading(true);
-        setError(null);
-
-        const [statsData, feedbacksData] = await Promise.all([
-          getAppStats(selectedAppId, days),
-          getAppFeedbacks(selectedAppId, 1, 10),
-        ]);
-
-        setStats(statsData);
-        setFeedbacks(feedbacksData.feedbacks);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data');
-        console.error('Failed to load data:', err);
-      } finally {
-        setIsLoading(false);
+      } else {
+        setIsRefreshing(true);
       }
-    };
+      setError(null);
 
-    fetchData();
+      const [statsData, feedbacksData] = await Promise.all([
+        getAppStats(selectedAppId, days),
+        getAppFeedbacks(selectedAppId, 1, 10),
+      ]);
+
+      setStats(statsData);
+      setFeedbacks(feedbacksData.feedbacks);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+      console.error('Failed to load data:', err);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
   }, [selectedAppId, days]);
+
+  // Fetch data when app or date range changes
+  useEffect(() => {
+    fetchData(true);
+  }, [fetchData]);
+
+  // Refresh handler
+  const handleRefresh = useCallback(() => {
+    fetchData(false);
+  }, [fetchData]);
 
   // Transform data for charts
   const chartData = useMemo(() => {
@@ -78,11 +91,25 @@ export default function DashboardPage() {
     return Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
   }, [stats]);
 
+  // Format platform name for display
+  const formatPlatformName = (platform: string | undefined): string => {
+    if (!platform) return '未知';
+    const platformMap: Record<string, string> = {
+      'macos': 'macOS',
+      'windows': 'Windows',
+      'linux': 'Linux',
+      'ios': 'iOS',
+      'android': 'Android',
+      'web': 'Web',
+    };
+    return platformMap[platform.toLowerCase()] || platform;
+  };
+
   // Transform platform stats for chart
   const platformData = useMemo(() => {
     if (!stats) return [];
     return stats.platform_stats.map(p => ({
-      platform: p.platform?.toUpperCase() || 'Unknown',
+      platform: formatPlatformName(p.platform),
       count: p.count,
     }));
   }, [stats]);
@@ -125,32 +152,42 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="w-full">
+    <div className="w-full h-full flex flex-col">
       {/* 页面标题 */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-8 flex-shrink-0">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900">
             {selectedApp.app_name}
           </h1>
           <p className="text-neutral-400 mt-1">{selectedApp.app_id}</p>
         </div>
-        <DateFilter value={dateRange} onChange={setDateRange} />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="p-2 rounded-xl bg-white hover:bg-neutral-50 text-neutral-500 hover:text-neutral-700 transition-colors disabled:opacity-50"
+            title="刷新数据"
+          >
+            <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
+          <DateFilter value={dateRange} onChange={setDateRange} />
+        </div>
       </div>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm">
+        <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm flex-shrink-0">
           {error}
         </div>
       )}
 
       {isLoading ? (
-        <div className="flex items-center justify-center h-64">
+        <div className="flex items-center justify-center flex-1">
           <Loader2 className="w-6 h-6 animate-spin text-neutral-400" />
         </div>
       ) : (
-        <>
+        <div className="flex flex-col flex-1 min-h-0">
           {/* 核心指标卡片 */}
-          <div className="grid grid-cols-3 gap-5 mb-8">
+          <div className="grid grid-cols-3 gap-5 mb-8 flex-shrink-0">
             <StatsCard
               title="总下载量"
               value={summaryStats.totalDownloads}
@@ -171,7 +208,7 @@ export default function DashboardPage() {
           </div>
 
           {/* 图表区域 */}
-          <div className="grid grid-cols-2 gap-5 mb-8">
+          <div className="grid grid-cols-2 gap-5 mb-8 flex-shrink-0">
             <DailyChart
               data={chartData}
               dataKey="downloads"
@@ -180,51 +217,19 @@ export default function DashboardPage() {
             <DailyChart data={chartData} dataKey="dau" title="每日活跃用户" />
           </div>
 
-          {/* 留存、平台分布、用户反馈 */}
-          <div className="grid grid-cols-3 gap-5">
+          {/* 留存、平台分布、用户反馈 - 自适应填充剩余空间 */}
+          <div className="grid grid-cols-3 gap-5 flex-1 min-h-0">
             <RetentionChart data={stats?.retention || { d1: 0, d7: 0, d30: 0 }} />
             <PlatformChart data={platformData} />
-
-            {/* 用户反馈 */}
-            <div className="bg-white rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-medium text-neutral-900">用户反馈</h3>
-                <span className="text-xs text-neutral-400">{feedbacks.length} 条</span>
-              </div>
-
-              <div className="space-y-3 max-h-64 overflow-y-auto hide-scrollbar">
-                {feedbacks.length > 0 ? (
-                  feedbacks.map((feedback) => (
-                    <div key={feedback.id} className="p-3 bg-[#f8f8f8] rounded-xl">
-                      <p className="text-sm text-neutral-700 line-clamp-2">
-                        {feedback.content}
-                      </p>
-                      <div className="flex items-center gap-3 mt-2">
-                        {feedback.contact && (
-                          <div className="flex items-center gap-1 text-xs text-neutral-400">
-                            <Mail className="w-3 h-3" />
-                            <span className="truncate max-w-20">{feedback.contact}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center gap-1 text-xs text-neutral-400">
-                          <Clock className="w-3 h-3" />
-                          <span>
-                            {new Date(feedback.created_at * 1000).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-8 text-neutral-300">
-                    <MessageSquare className="w-8 h-8 mb-2" />
-                    <p className="text-sm">暂无反馈</p>
-                  </div>
-                )}
-              </div>
-            </div>
+            <FeedbackCard
+              feedbacks={feedbacks}
+              appId={selectedAppId!}
+              onFeedbackDeleted={(feedbackId) => {
+                setFeedbacks((prev) => prev.filter((f) => f.id !== feedbackId));
+              }}
+            />
           </div>
-        </>
+        </div>
       )}
     </div>
   );

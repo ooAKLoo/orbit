@@ -136,6 +136,10 @@ export async function getAppFeedbacks(
   return fetchApi(`/admin/apps/${appId}/feedbacks?page=${page}&limit=${limit}`);
 }
 
+export async function deleteFeedback(appId: string, feedbackId: number): Promise<void> {
+  await fetchApi(`/admin/apps/${appId}/feedbacks/${feedbackId}`, { method: 'DELETE' });
+}
+
 // ============ Versions API ============
 
 export async function getAppVersions(appId: string): Promise<Version[]> {

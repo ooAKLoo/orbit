@@ -114,95 +114,158 @@ export default function AppDetailPage() {
     }
   };
 
-  const getSwiftCode = (appId: string) => `// 1. 添加 Swift Package (Xcode: File → Add Package Dependencies)
-// https://github.com/ooAKLoo/orbit.git
+  const getSwiftCode = (appId: string) => `// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 1: 添加依赖
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Xcode → File → Add Package Dependencies
+// 输入: https://github.com/ooAKLoo/orbit.git
 
-// 2. 在 AppDelegate 中初始化
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 2: 初始化 SDK
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 import Orbit
 
-func application(_ application: UIApplication,
-    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-    Orbit.configure(appId: "${appId}")
-    return true
+@main
+struct MyApp: App {
+    init() {
+        // 默认自动追踪下载量和日活
+        Orbit.configure(appId: "${appId}")
+
+        // 网站/仅反馈模式 - 关闭自动追踪
+        // Orbit.configure(appId: "${appId}", autoTrack: false)
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+        }
+    }
 }
 
-// ✅ 下载量和日活会自动追踪，无需额外代码
 
-// 3. 检查版本更新（可选）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 3: 检查更新 (可选)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Orbit.checkUpdate { result in
     if result.hasUpdate {
         print("新版本: \\(result.latestVersion)")
         print("更新说明: \\(result.releaseNotes)")
-        print("是否强制更新: \\(result.forceUpdate)")
+        print("强制更新: \\(result.forceUpdate)")
         print("下载地址: \\(result.downloadUrl)")
     }
 }
 
-// 4. 提交用户反馈（可选）
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 4: 用户反馈 (可选)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Orbit.sendFeedback(
     content: "用户反馈内容",
-    contact: "user@example.com"  // 可选
+    contact: "user@example.com"   // 可选
 )`;
 
-  const getKotlinCode = (appId: string) => `// 1. 添加 JitPack 仓库 (settings.gradle.kts)
-// maven { url = uri("https://jitpack.io") }
+  const getKotlinCode = (appId: string) => `// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 1: 添加 JitPack 仓库
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        maven { url = uri("https://jitpack.io") }
+    }
+}
 
-// 2. 添加依赖 (build.gradle.kts)
-// implementation("com.github.ooAKLoo:orbit:0.1.0")
 
-// 3. 在 Application 中初始化
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 2: 添加依赖
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// build.gradle.kts
+dependencies {
+    implementation("com.github.ooAKLoo:orbit:0.1.0")
+}
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 3: 初始化 SDK
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 import com.orbit.Orbit
 
 class MyApp : Application() {
     override fun onCreate() {
         super.onCreate()
+
+        // 默认自动追踪下载量和日活
         Orbit.configure(this, "${appId}")
+
+        // 网站/仅反馈模式 - 关闭自动追踪
+        // Orbit.configure(this, "${appId}", autoTrack = false)
     }
 }
 
-// ✅ 下载量和日活会自动追踪，无需额外代码
 
-// 4. 检查版本更新（可选）
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 4: 检查更新 (可选)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Orbit.checkUpdate { result ->
     if (result.hasUpdate) {
         println("新版本: \${result.latestVersion}")
         println("更新说明: \${result.releaseNotes}")
-        println("是否强制更新: \${result.forceUpdate}")
+        println("强制更新: \${result.forceUpdate}")
         println("下载地址: \${result.downloadUrl}")
     }
 }
 
-// 5. 提交用户反馈（可选）
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 5: 用户反馈 (可选)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Orbit.sendFeedback(
     content = "用户反馈内容",
-    contact = "user@example.com"  // 可选
+    contact = "user@example.com"   // 可选
 )`;
 
-  const getTypeScriptCode = (appId: string) => `// 1. 安装依赖
+  const getTypeScriptCode = (appId: string) => `// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 1: 安装依赖
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 npm install @ooakloowj/orbit
 
-// 2. 在应用入口初始化 (Electron/Tauri/Node.js)
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 2: 初始化 SDK
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 import { Orbit } from '@ooakloowj/orbit';
 
+// 桌面应用 (Electron/Tauri) - 自动追踪下载量和日活
 Orbit.configure({
-  appId: '${appId}',
+    appId: '${appId}',
 });
 
-// ✅ 下载量和日活会自动追踪，无需额外代码
+// 网站/仅反馈模式 - 关闭自动追踪
+Orbit.configure({
+    appId: '${appId}',
+    autoTrack: false,
+});
 
-// 3. 检查版本更新（可选）
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 3: 检查更新 (可选)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const result = await Orbit.checkUpdate();
+
 if (result.hasUpdate) {
-  console.log('新版本:', result.latestVersion);
-  console.log('更新说明:', result.releaseNotes);
-  console.log('是否强制更新:', result.forceUpdate);
-  console.log('下载地址:', result.downloadUrl);
+    console.log('新版本:', result.latestVersion);
+    console.log('更新说明:', result.releaseNotes);
+    console.log('强制更新:', result.forceUpdate);
+    console.log('下载地址:', result.downloadUrl);
 }
 
-// 4. 提交用户反馈（可选）
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STEP 4: 用户反馈 (可选)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 await Orbit.sendFeedback({
-  content: '用户反馈内容',
-  contact: 'user@example.com',  // 可选
+    content: '用户反馈内容',
+    contact: 'user@example.com',   // 可选
 });`;
 
   const copyToClipboard = (text: string, id: string) => {

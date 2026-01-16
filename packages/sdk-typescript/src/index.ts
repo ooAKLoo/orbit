@@ -14,7 +14,10 @@ export interface OrbitConfig {
   endpoint?: string;
   /** Force use China endpoint (Tencent Cloud Function) */
   forceChina?: boolean;
+  /** Enable debug logging (default: false) */
   enableLogging?: boolean;
+  /** Auto-track downloads and DAU (default: true). Set to false for web/feedback-only usage. */
+  autoTrack?: boolean;
   flushInterval?: number;
 }
 
@@ -91,19 +94,25 @@ class OrbitSDK {
   private endpoint = ENDPOINT_GLOBAL;
   private distinctId: string | null = null;
   private enableLogging = false;
+  private autoTrack = true;
   private storage = new Storage();
   private eventQueue: EventPayload[] = [];
   private configured = false;
 
   /**
-   * Initialize the SDK. This automatically tracks first_launch and app_open events.
+   * Initialize the SDK.
    *
    * @example
    * ```ts
-   * import { Orbit } from '@aspect/orbit';
-   *
+   * // Full tracking (Electron/Tauri apps)
    * Orbit.configure({
    *   appId: 'com.example.app',
+   * });
+   *
+   * // Feedback only (websites)
+   * Orbit.configure({
+   *   appId: 'com.example.app',
+   *   autoTrack: false,
    * });
    * ```
    */
@@ -115,6 +124,7 @@ class OrbitSDK {
 
     this.appId = config.appId;
     this.enableLogging = config.enableLogging ?? false;
+    this.autoTrack = config.autoTrack ?? true;
 
     // Determine endpoint: explicit > forceChina > auto-detect
     if (config.endpoint) {
@@ -130,26 +140,29 @@ class OrbitSDK {
     // Get or create device ID
     this.distinctId = this.getOrCreateDistinctId();
 
-    // Restore failed events from storage
-    this.restoreEventQueue();
+    // Auto-track downloads and DAU (can be disabled for web/feedback-only)
+    if (this.autoTrack) {
+      // Restore failed events from storage
+      this.restoreEventQueue();
 
-    // Check if first launch
-    const hasLaunched = this.storage.get('has_launched') === 'true';
+      // Check if first launch
+      const hasLaunched = this.storage.get('has_launched') === 'true';
 
-    if (!hasLaunched) {
-      // First launch
-      this.track('first_launch');
-      this.storage.set('has_launched', 'true');
+      if (!hasLaunched) {
+        // First launch
+        this.track('first_launch');
+        this.storage.set('has_launched', 'true');
+      }
+
+      // Track app open on every launch
+      this.track('app_open');
+
+      // Flush queued events
+      this.flushEventQueue();
     }
 
-    // Track app open on every launch
-    this.track('app_open');
-
-    // Flush queued events
-    this.flushEventQueue();
-
     this.configured = true;
-    this.log(`Initialized with appId: ${this.appId}`);
+    this.log(`Initialized with appId: ${this.appId}, autoTrack: ${this.autoTrack}`);
   }
 
   /**
