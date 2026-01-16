@@ -1,17 +1,17 @@
-# orbit-sdk
+# @ooakloowj/orbit
 
 Lightweight analytics SDK for Electron/Tauri apps. Auto-track downloads, DAU, and retention with one line of code.
 
 ## Installation
 
 ```bash
-npm install orbit-sdk
+npm install @ooakloowj/orbit
 ```
 
 ## Quick Start
 
 ```typescript
-import { Orbit } from 'orbit-sdk';
+import { Orbit } from '@ooakloowj/orbit';
 
 // Initialize in your app entry point
 Orbit.configure({

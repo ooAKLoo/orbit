@@ -11,7 +11,23 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
-import { DailyStats, PlatformStats, RetentionStats } from '@/lib/mock-data';
+// Types for chart data
+interface DailyStats {
+  date: string;
+  downloads: number;
+  dau: number;
+}
+
+interface PlatformStats {
+  platform: string;
+  count: number;
+}
+
+interface RetentionStats {
+  d1: number;
+  d7: number;
+  d30: number;
+}
 
 interface DailyChartProps {
   data: DailyStats[];
@@ -60,7 +76,7 @@ export function DailyChart({ data, dataKey, title }: DailyChartProps) {
                 padding: '12px',
               }}
               labelFormatter={(label) => new Date(label).toLocaleDateString('zh-CN')}
-              formatter={(value: number) => [value.toLocaleString(), title]}
+              formatter={(value) => [typeof value === 'number' ? value.toLocaleString() : value, title]}
             />
             <Area
               type="monotone"
@@ -149,7 +165,7 @@ export function RetentionChart({ data }: RetentionChartProps) {
                 boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
                 padding: '12px',
               }}
-              formatter={(value: number) => [`${value.toFixed(1)}%`, '留存率']}
+              formatter={(value) => [typeof value === 'number' ? `${value.toFixed(1)}%` : value, '留存率']}
             />
             <Bar dataKey="rate" fill="#171717" radius={[6, 6, 0, 0]} />
           </BarChart>

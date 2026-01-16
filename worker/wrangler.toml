@@ -1,0 +1,11 @@
+name = "orbit-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+ENVIRONMENT = "production"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "orbit-db"
+database_id = "fc805556-44b0-4ac1-b94e-c6cf7eb83864"

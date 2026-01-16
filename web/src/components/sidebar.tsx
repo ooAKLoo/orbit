@@ -2,13 +2,13 @@
 
 import { useAuth } from '@/lib/auth-context';
 import { useApp } from '@/lib/app-context';
-import { LogOut, Plus, ChevronDown, Settings, Code } from 'lucide-react';
+import { LogOut, Plus, ChevronDown, Settings, Code, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
 export function Sidebar() {
   const { user, logout } = useAuth();
-  const { apps, selectedApp, selectedAppId, setSelectedAppId } = useApp();
+  const { apps, selectedApp, selectedAppId, setSelectedAppId, isLoading } = useApp();
   const [showApps, setShowApps] = useState(false);
 
   return (
@@ -52,7 +52,14 @@ export function Sidebar() {
 
         {showApps && (
           <div className="mt-2 p-2 bg-white rounded-xl space-y-1">
-            {apps.map((app) => (
+            {isLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-4 h-4 animate-spin text-neutral-400" />
+              </div>
+            ) : apps.length === 0 ? (
+              <div className="px-3 py-2 text-sm text-neutral-400">暂无应用</div>
+            ) : null}
+            {!isLoading && apps.map((app) => (
               <div
                 key={app.id}
                 className={`flex items-center justify-between rounded-lg transition-colors ${

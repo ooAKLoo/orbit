@@ -1,23 +1,64 @@
 'use client';
 
 import { useApp } from '@/lib/app-context';
-import { Copy, Key, Check, ArrowLeft, Trash2, Plus, Package } from 'lucide-react';
-import { useState } from 'react';
+import { Copy, Key, Check, ArrowLeft, Trash2, Plus, Package, Loader2, X } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import { getAppVersions, createVersion, Version } from '@/lib/api';
 
 type Platform = 'swift' | 'kotlin' | 'typescript';
 
 export default function AppDetailPage() {
   const params = useParams();
-  const { apps } = useApp();
+  const router = useRouter();
+  const { apps, deleteApp } = useApp();
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('swift');
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [isLoadingVersions, setIsLoadingVersions] = useState(true);
+  const [showNewVersionModal, setShowNewVersionModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const app = apps.find((a) => a.app_id === params.appId);
 
+  // Fetch versions
+  useEffect(() => {
+    if (!app) return;
+
+    const fetchVersions = async () => {
+      try {
+        setIsLoadingVersions(true);
+        const data = await getAppVersions(app.app_id);
+        setVersions(data);
+      } catch (err) {
+        console.error('Failed to load versions:', err);
+      } finally {
+        setIsLoadingVersions(false);
+      }
+    };
+
+    fetchVersions();
+  }, [app]);
+
+  const handleDelete = async () => {
+    if (!app) return;
+    if (!confirm(`确定要删除应用 "${app.app_name}" 吗？此操作不可撤销。`)) return;
+
+    setIsDeleting(true);
+    try {
+      await deleteApp(app.app_id);
+      router.push('/dashboard');
+    } catch (err) {
+      console.error('Failed to delete app:', err);
+      alert('删除失败，请重试');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const getSwiftCode = (appId: string) => `// 1. 添加 Swift Package
-// https://github.com/aspect-build/orbit-swift
+// https://github.com/ooAKLoo/orbit-swift
 
 // 2. 在 AppDelegate 中初始化
 import Orbit
@@ -47,10 +88,10 @@ Orbit.sendFeedback(
 )`;
 
   const getKotlinCode = (appId: string) => `// 1. 添加依赖
-// implementation("com.aspect.orbit:orbit-android:1.0.0")
+// implementation("com.orbit:orbit-android:1.0.0")
 
 // 2. 在 Application 中初始化
-import com.aspect.orbit.Orbit
+import com.orbit.Orbit
 
 class MyApp : Application() {
     override fun onCreate() {
@@ -78,10 +119,10 @@ Orbit.sendFeedback(
 )`;
 
   const getTypeScriptCode = (appId: string) => `// 1. 安装依赖
-// npm install @aspect/orbit
+// npm install orbit-sdk
 
 // 2. 在应用入口初始化 (Electron/Tauri)
-import { Orbit } from '@aspect/orbit';
+import { Orbit } from 'orbit-sdk';
 
 Orbit.configure({
   appId: '${appId}',
@@ -137,8 +178,16 @@ Orbit.sendFeedback({
           </h1>
           <p className="text-neutral-400 mt-1">{app.app_id}</p>
         </div>
-        <button className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors">
-          <Trash2 className="w-5 h-5" />
+        <button
+          onClick={handleDelete}
+          disabled={isDeleting}
+          className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-50"
+        >
+          {isDeleting ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Trash2 className="w-5 h-5" />
+          )}
         </button>
       </div>
 
@@ -200,54 +249,56 @@ Orbit.sendFeedback({
                 <Package className="w-4 h-4 text-neutral-900" />
                 <span className="text-sm font-medium text-neutral-900">版本管理</span>
               </div>
-              <button className="px-3 py-1.5 bg-neutral-900 text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors flex items-center gap-1.5">
+              <button
+                onClick={() => setShowNewVersionModal(true)}
+                className="px-3 py-1.5 bg-neutral-900 text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors flex items-center gap-1.5"
+              >
                 <Plus className="w-4 h-4" />
                 发布新版本
               </button>
             </div>
 
-            {/* 版本列表 - Mock 数据 */}
+            {/* 版本列表 */}
             <div className="space-y-3 lg:flex-1 lg:overflow-y-auto">
-              <div className="p-4 bg-[#f8f8f8] rounded-xl">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded">
-                      最新
-                    </span>
-                    <span className="font-mono text-sm font-medium text-neutral-900">v1.2.0</span>
+              {isLoadingVersions ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin text-neutral-400" />
+                </div>
+              ) : versions.length > 0 ? (
+                versions.map((version, index) => (
+                  <div key={version.id} className="p-4 bg-[#f8f8f8] rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        {index === 0 && (
+                          <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded">
+                            最新
+                          </span>
+                        )}
+                        <span className="font-mono text-sm font-medium text-neutral-900">
+                          v{version.version}
+                        </span>
+                        <span className="text-xs text-neutral-400 bg-neutral-200 px-1.5 py-0.5 rounded">
+                          {version.platform}
+                        </span>
+                      </div>
+                      <span className="text-xs text-neutral-400">
+                        {new Date(version.created_at * 1000).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {version.changelog && (
+                      <p className="text-sm text-neutral-500 mt-2">{version.changelog}</p>
+                    )}
+                    <div className="flex items-center gap-4 mt-3 text-xs text-neutral-400">
+                      <span>强制更新: {version.force_update ? '是' : '否'}</span>
+                    </div>
                   </div>
-                  <span className="text-xs text-neutral-400">2024-01-15</span>
+                ))
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 text-neutral-300">
+                  <Package className="w-8 h-8 mb-2" />
+                  <p className="text-sm">暂无版本</p>
                 </div>
-                <p className="text-sm text-neutral-500 mt-2">修复了若干 bug，提升了性能</p>
-                <div className="flex items-center gap-4 mt-3 text-xs text-neutral-400">
-                  <span>最低版本: v1.0.0</span>
-                  <span>强制更新: 否</span>
-                </div>
-              </div>
-
-              <div className="p-4 bg-[#f8f8f8] rounded-xl">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-sm font-medium text-neutral-900">v1.1.0</span>
-                  <span className="text-xs text-neutral-400">2024-01-01</span>
-                </div>
-                <p className="text-sm text-neutral-500 mt-2">新增深色模式支持</p>
-                <div className="flex items-center gap-4 mt-3 text-xs text-neutral-400">
-                  <span>最低版本: v1.0.0</span>
-                  <span>强制更新: 否</span>
-                </div>
-              </div>
-
-              <div className="p-4 bg-[#f8f8f8] rounded-xl">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-sm font-medium text-neutral-900">v1.0.0</span>
-                  <span className="text-xs text-neutral-400">2023-12-15</span>
-                </div>
-                <p className="text-sm text-neutral-500 mt-2">首次发布</p>
-                <div className="flex items-center gap-4 mt-3 text-xs text-neutral-400">
-                  <span>最低版本: v1.0.0</span>
-                  <span>强制更新: 否</span>
-                </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -325,6 +376,177 @@ Orbit.sendFeedback({
             </button>
           </div>
         </div>
+      </div>
+
+      {/* New Version Modal */}
+      {showNewVersionModal && (
+        <NewVersionModal
+          appId={app.app_id}
+          onClose={() => setShowNewVersionModal(false)}
+          onSuccess={async () => {
+            setShowNewVersionModal(false);
+            const data = await getAppVersions(app.app_id);
+            setVersions(data);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// New Version Modal Component
+function NewVersionModal({
+  appId,
+  onClose,
+  onSuccess,
+}: {
+  appId: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [platform, setPlatform] = useState('ios');
+  const [version, setVersion] = useState('');
+  const [changelog, setChangelog] = useState('');
+  const [downloadUrl, setDownloadUrl] = useState('');
+  const [forceUpdate, setForceUpdate] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!version.trim()) return;
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      await createVersion(appId, {
+        platform,
+        version,
+        changelog: changelog || undefined,
+        download_url: downloadUrl || undefined,
+        force_update: forceUpdate,
+      });
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create version');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-lg font-semibold text-neutral-900">发布新版本</h2>
+          <button
+            onClick={onClose}
+            className="p-1 text-neutral-400 hover:text-neutral-600"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-xl text-sm">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Platform */}
+          <div>
+            <label className="block text-sm font-medium text-neutral-900 mb-2">
+              平台
+            </label>
+            <select
+              value={platform}
+              onChange={(e) => setPlatform(e.target.value)}
+              className="w-full px-4 py-3 bg-[#f8f8f8] rounded-xl text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+            >
+              <option value="ios">iOS</option>
+              <option value="macos">macOS</option>
+              <option value="android">Android</option>
+              <option value="windows">Windows</option>
+            </select>
+          </div>
+
+          {/* Version */}
+          <div>
+            <label className="block text-sm font-medium text-neutral-900 mb-2">
+              版本号
+            </label>
+            <input
+              type="text"
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              placeholder="1.2.0"
+              className="w-full px-4 py-3 bg-[#f8f8f8] rounded-xl text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 font-mono"
+            />
+          </div>
+
+          {/* Changelog */}
+          <div>
+            <label className="block text-sm font-medium text-neutral-900 mb-2">
+              更新说明
+            </label>
+            <textarea
+              value={changelog}
+              onChange={(e) => setChangelog(e.target.value)}
+              placeholder="描述本次更新的内容..."
+              rows={3}
+              className="w-full px-4 py-3 bg-[#f8f8f8] rounded-xl text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900/10 resize-none"
+            />
+          </div>
+
+          {/* Download URL */}
+          <div>
+            <label className="block text-sm font-medium text-neutral-900 mb-2">
+              下载链接 <span className="text-neutral-400 font-normal">(可选)</span>
+            </label>
+            <input
+              type="text"
+              value={downloadUrl}
+              onChange={(e) => setDownloadUrl(e.target.value)}
+              placeholder="https://..."
+              className="w-full px-4 py-3 bg-[#f8f8f8] rounded-xl text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+            />
+          </div>
+
+          {/* Force Update */}
+          <div className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              id="forceUpdate"
+              checked={forceUpdate}
+              onChange={(e) => setForceUpdate(e.target.checked)}
+              className="w-4 h-4 rounded border-neutral-300"
+            />
+            <label htmlFor="forceUpdate" className="text-sm text-neutral-700">
+              强制更新
+            </label>
+          </div>
+
+          {/* Submit */}
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={!version.trim() || isSubmitting}
+              className="px-5 py-2 bg-neutral-900 text-white text-sm font-medium rounded-xl hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            >
+              {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              {isSubmitting ? '发布中...' : '发布'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );

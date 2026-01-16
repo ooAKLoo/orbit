@@ -150,7 +150,7 @@ App 启动
 ### 上报请求
 
 ```http
-POST https://orbit.xxx.workers.dev/v1/{app_id}/event
+POST https://orbit-api.yangdongjuooakloo.workers.dev/v1/{app_id}/event
 Content-Type: application/json
 
 {
@@ -186,7 +186,7 @@ public final class Orbit {
     public static let shared = Orbit()
 
     private var appId: String?
-    private var endpoint: String = "https://orbit.xxx.workers.dev"
+    private var endpoint: String = "https://orbit-api.yangdongjuooakloo.workers.dev"
     private var distinctId: String?
 
     private init() {}
@@ -447,7 +447,7 @@ import java.util.*
 object Orbit {
 
     private var appId: String? = null
-    private var endpoint: String = "https://orbit.xxx.workers.dev"
+    private var endpoint: String = "https://orbit-api.yangdongjuooakloo.workers.dev"
     private var distinctId: String? = null
     private lateinit var prefs: SharedPreferences
 

@@ -2,14 +2,17 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { useApp } from '@/lib/app-context';
 
 export default function NewAppPage() {
   const router = useRouter();
+  const { createApp } = useApp();
   const [appName, setAppName] = useState('');
   const [appId, setAppId] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleAppNameChange = (value: string) => {
     setAppName(value);
@@ -26,9 +29,16 @@ export default function NewAppPage() {
     if (!appName.trim() || !appId.trim()) return;
 
     setIsSubmitting(true);
-    // TODO: 调用 API 创建应用
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    router.push('/dashboard');
+    setError(null);
+
+    try {
+      await createApp(appId, appName);
+      router.push('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create app');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -47,6 +57,13 @@ export default function NewAppPage() {
         <h1 className="text-2xl font-semibold text-neutral-900">添加应用</h1>
         <p className="text-neutral-400 mt-1">创建一个新的应用来追踪数据</p>
       </div>
+
+      {/* 错误提示 */}
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm">
+          {error}
+        </div>
+      )}
 
       {/* 表单 */}
       <form onSubmit={handleSubmit} className="bg-white rounded-2xl p-6">
@@ -88,8 +105,9 @@ export default function NewAppPage() {
           <button
             type="submit"
             disabled={!appName.trim() || !appId.trim() || isSubmitting}
-            className="px-5 py-2.5 bg-neutral-900 text-white text-sm font-medium rounded-xl hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-5 py-2.5 bg-neutral-900 text-white text-sm font-medium rounded-xl hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
+            {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
             {isSubmitting ? '创建中...' : '创建应用'}
           </button>
         </div>
