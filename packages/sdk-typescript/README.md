@@ -1,17 +1,17 @@
-# @aspect/orbit
+# orbit-sdk
 
 Lightweight analytics SDK for Electron/Tauri apps. Auto-track downloads, DAU, and retention with one line of code.
 
 ## Installation
 
 ```bash
-npm install @aspect/orbit
+npm install orbit-sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { Orbit } from '@aspect/orbit';
+import { Orbit } from 'orbit-sdk';
 
 // Initialize in your app entry point
 Orbit.configure({
