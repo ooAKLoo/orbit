@@ -1,0 +1,52 @@
+{
+  "name": "@aspect/orbit",
+  "version": "0.1.0",
+  "description": "Lightweight analytics SDK for Electron/Tauri apps - auto-track downloads, DAU, and retention",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "lint": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "analytics",
+    "electron",
+    "tauri",
+    "sdk",
+    "dau",
+    "retention",
+    "orbit"
+  ],
+  "author": "Aspect",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ooAKLoo/orbit.git",
+    "directory": "packages/sdk-typescript"
+  },
+  "homepage": "https://github.com/ooAKLoo/orbit#readme",
+  "bugs": {
+    "url": "https://github.com/ooAKLoo/orbit/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
