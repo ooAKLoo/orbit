@@ -82,7 +82,7 @@ class Storage {
 
 class OrbitSDK {
   private appId: string | null = null;
-  private endpoint = 'https://orbit-api.aspect.dev';
+  private endpoint = 'https://orbit-api.yangdongjuooakloo.workers.dev';
   private distinctId: string | null = null;
   private enableLogging = false;
   private storage = new Storage();

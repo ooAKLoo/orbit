@@ -57,8 +57,8 @@ export default function AppDetailPage() {
     }
   };
 
-  const getSwiftCode = (appId: string) => `// 1. 添加 Swift Package
-// https://github.com/ooAKLoo/orbit-swift
+  const getSwiftCode = (appId: string) => `// 1. 添加 Swift Package (Xcode: File → Add Package Dependencies)
+// https://github.com/ooAKLoo/orbit.git
 
 // 2. 在 AppDelegate 中初始化
 import Orbit
@@ -71,7 +71,7 @@ func application(_ application: UIApplication,
 
 // ✅ 下载量和日活会自动追踪，无需额外代码
 
-// 3. 检查版本更新
+// 3. 检查版本更新（可选）
 Orbit.checkUpdate { result in
     if result.hasUpdate {
         print("新版本: \\(result.latestVersion)")
@@ -87,10 +87,13 @@ Orbit.sendFeedback(
     contact: "user@example.com"  // 可选
 )`;
 
-  const getKotlinCode = (appId: string) => `// 1. 添加依赖
-// implementation("com.orbit:orbit-android:1.0.0")
+  const getKotlinCode = (appId: string) => `// 1. 添加 JitPack 仓库 (settings.gradle.kts)
+// maven { url = uri("https://jitpack.io") }
 
-// 2. 在 Application 中初始化
+// 2. 添加依赖 (build.gradle.kts)
+// implementation("com.github.ooAKLoo:orbit:0.1.0")
+
+// 3. 在 Application 中初始化
 import com.orbit.Orbit
 
 class MyApp : Application() {
@@ -102,7 +105,7 @@ class MyApp : Application() {
 
 // ✅ 下载量和日活会自动追踪，无需额外代码
 
-// 3. 检查版本更新
+// 4. 检查版本更新（可选）
 Orbit.checkUpdate { result ->
     if (result.hasUpdate) {
         println("新版本: \${result.latestVersion}")
@@ -112,17 +115,17 @@ Orbit.checkUpdate { result ->
     }
 }
 
-// 4. 提交用户反馈（可选）
+// 5. 提交用户反馈（可选）
 Orbit.sendFeedback(
     content = "用户反馈内容",
     contact = "user@example.com"  // 可选
 )`;
 
   const getTypeScriptCode = (appId: string) => `// 1. 安装依赖
-// npm install orbit-sdk
+npm install @ooakloowj/orbit
 
-// 2. 在应用入口初始化 (Electron/Tauri)
-import { Orbit } from 'orbit-sdk';
+// 2. 在应用入口初始化 (Electron/Tauri/Node.js)
+import { Orbit } from '@ooakloowj/orbit';
 
 Orbit.configure({
   appId: '${appId}',
@@ -130,7 +133,7 @@ Orbit.configure({
 
 // ✅ 下载量和日活会自动追踪，无需额外代码
 
-// 3. 检查版本更新
+// 3. 检查版本更新（可选）
 const result = await Orbit.checkUpdate();
 if (result.hasUpdate) {
   console.log('新版本:', result.latestVersion);
@@ -140,7 +143,7 @@ if (result.hasUpdate) {
 }
 
 // 4. 提交用户反馈（可选）
-Orbit.sendFeedback({
+await Orbit.sendFeedback({
   content: '用户反馈内容',
   contact: 'user@example.com',  // 可选
 });`;
