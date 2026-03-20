@@ -12,7 +12,7 @@ type Platform = 'swift' | 'kotlin' | 'typescript';
 export default function AppDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { apps, deleteApp } = useApp();
+  const { apps, deleteApp, refreshApps, setSelectedAppId } = useApp();
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('swift');
   const [versions, setVersions] = useState<Version[]>([]);
@@ -23,6 +23,9 @@ export default function AppDetailPage() {
   const [isEditingRepo, setIsEditingRepo] = useState(false);
   const [isSavingRepo, setIsSavingRepo] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isEditingAppId, setIsEditingAppId] = useState(false);
+  const [editAppId, setEditAppId] = useState('');
+  const [isSavingAppId, setIsSavingAppId] = useState(false);
 
   const app = apps.find((a) => a.app_id === params.appId);
 
@@ -111,6 +114,28 @@ export default function AppDetailPage() {
       alert('同步失败，请检查 GitHub 仓库地址是否正确');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleSaveAppId = async () => {
+    if (!app) return;
+    const newId = editAppId.trim();
+    if (!newId || newId === app.app_id) {
+      setIsEditingAppId(false);
+      return;
+    }
+
+    setIsSavingAppId(true);
+    try {
+      await updateApp(app.app_id, { app_id: newId });
+      await refreshApps();
+      setSelectedAppId(newId);
+      router.push(`/dashboard/apps/${newId}`);
+    } catch (err) {
+      console.error('Failed to update App ID:', err);
+      alert(err instanceof Error ? err.message : '修改失败，请重试');
+    } finally {
+      setIsSavingAppId(false);
     }
   };
 
@@ -347,22 +372,62 @@ await Orbit.sendFeedback({
           <div className="bg-white rounded-2xl p-6">
             <div className="text-sm font-medium text-neutral-900 mb-3">App ID</div>
             <p className="text-sm text-neutral-500 mb-3">用于客户端 SDK 初始化</p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm font-mono text-neutral-600 truncate">
-                {app.app_id}
-              </code>
-              <button
-                onClick={() => copyToClipboard(app.app_id, 'app-id')}
-                className="px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm text-neutral-600 hover:text-neutral-900 transition-colors flex items-center gap-2 shrink-0"
-              >
-                {copiedId === 'app-id' ? (
-                  <Check className="w-4 h-4 text-green-500" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
-                {copiedId === 'app-id' ? '已复制' : '复制'}
-              </button>
-            </div>
+            {isEditingAppId ? (
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={editAppId}
+                  onChange={(e) => setEditAppId(e.target.value)}
+                  placeholder="com.example.myapp"
+                  className="w-full px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm font-mono text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900/10"
+                />
+                <div className="p-3 bg-amber-50 rounded-xl text-xs text-amber-700">
+                  修改 App ID 后，已部署的 SDK 需要同步更新 appId 配置并重新发版，否则数据将无法上报。
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveAppId}
+                    disabled={isSavingAppId || !editAppId.trim() || editAppId.trim() === app.app_id}
+                    className="px-4 py-2 bg-neutral-900 text-white text-sm font-medium rounded-lg hover:bg-neutral-800 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {isSavingAppId && <Loader2 className="w-4 h-4 animate-spin" />}
+                    保存
+                  </button>
+                  <button
+                    onClick={() => setIsEditingAppId(false)}
+                    className="px-4 py-2 text-sm text-neutral-600 hover:text-neutral-900"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm font-mono text-neutral-600 truncate">
+                  {app.app_id}
+                </code>
+                <button
+                  onClick={() => {
+                    setEditAppId(app.app_id);
+                    setIsEditingAppId(true);
+                  }}
+                  className="px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm text-neutral-600 hover:text-neutral-900 transition-colors shrink-0"
+                >
+                  编辑
+                </button>
+                <button
+                  onClick={() => copyToClipboard(app.app_id, 'app-id')}
+                  className="px-4 py-3 bg-[#f8f8f8] rounded-xl text-sm text-neutral-600 hover:text-neutral-900 transition-colors flex items-center gap-2 shrink-0"
+                >
+                  {copiedId === 'app-id' ? (
+                    <Check className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                  {copiedId === 'app-id' ? '已复制' : '复制'}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* GitHub 仓库配置 */}

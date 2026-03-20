@@ -170,10 +170,11 @@ export async function updateApp(
   appId: string,
   updates: {
     app_name?: string;
+    app_id?: string;
     github_repo?: string | null;
   }
-): Promise<void> {
-  await fetchApi(`/admin/apps/${appId}`, {
+): Promise<{ success: boolean; new_app_id?: string }> {
+  return fetchApi(`/admin/apps/${appId}`, {
     method: 'PATCH',
     body: JSON.stringify(updates),
   });

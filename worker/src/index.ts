@@ -669,9 +669,54 @@ async function handleGetApp(env: Env, appId: string): Promise<Response> {
 async function handleUpdateApp(request: Request, env: Env, appId: string): Promise<Response> {
   const body = await request.json() as {
     app_name?: string;
+    app_id?: string;
     github_repo?: string | null;
   };
 
+  const newAppId = body.app_id?.trim();
+
+  // Handle app_id change with cascade update
+  if (newAppId && newAppId !== appId) {
+    if (!newAppId) {
+      return errorResponse('App ID cannot be empty');
+    }
+
+    // Check uniqueness
+    const existing = await env.DB.prepare(
+      'SELECT app_id FROM applications WHERE app_id = ?'
+    ).bind(newAppId).first();
+
+    if (existing) {
+      return errorResponse('App ID already exists', 409);
+    }
+
+    // Build applications update with all changed fields
+    const appUpdates = ['app_id = ?'];
+    const appValues: (string | null)[] = [newAppId];
+
+    if (body.app_name !== undefined) {
+      appUpdates.push('app_name = ?');
+      appValues.push(body.app_name);
+    }
+    if (body.github_repo !== undefined) {
+      appUpdates.push('github_repo = ?');
+      appValues.push(body.github_repo);
+    }
+
+    appValues.push(appId);
+
+    // Cascade update all tables in a transaction via batch
+    await env.DB.batch([
+      env.DB.prepare('UPDATE events SET app_id = ? WHERE app_id = ?').bind(newAppId, appId),
+      env.DB.prepare('UPDATE feedbacks SET app_id = ? WHERE app_id = ?').bind(newAppId, appId),
+      env.DB.prepare('UPDATE versions SET app_id = ? WHERE app_id = ?').bind(newAppId, appId),
+      env.DB.prepare(`UPDATE applications SET ${appUpdates.join(', ')} WHERE app_id = ?`).bind(...appValues),
+    ]);
+
+    return jsonResponse({ success: true, new_app_id: newAppId });
+  }
+
+  // Regular update (no app_id change)
   const updates: string[] = [];
   const values: (string | null)[] = [];
 
