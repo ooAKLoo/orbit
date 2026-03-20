@@ -359,15 +359,19 @@ async function handleStats(request: Request, env: Env, appId: string, url: URL):
 
   // Aggregate downloads
   const downloadsByPlatform: Record<string, number> = {};
-  let totalDownloads = 0;
   const downloadsByDate: Array<{ date: string; count: number }> = [];
   const dateDownloads: Record<string, number> = {};
 
   for (const row of downloads.results || []) {
     downloadsByPlatform[row.platform] = (downloadsByPlatform[row.platform] || 0) + row.count;
-    totalDownloads += row.count;
     dateDownloads[row.date] = (dateDownloads[row.date] || 0) + row.count;
   }
+
+  // All-time total downloads (not limited by date range)
+  const allTimeDownloads = await env.DB.prepare(
+    `SELECT COUNT(*) as count FROM events WHERE app_id = ? AND event = 'first_launch'`
+  ).bind(appId).first<{ count: number }>();
+  const totalDownloads = allTimeDownloads?.count || 0;
 
   for (const [date, count] of Object.entries(dateDownloads)) {
     downloadsByDate.push({ date, count });
@@ -893,7 +897,13 @@ async function handleAppStats(request: Request, env: Env, appId: string, url: UR
   // Calculate totals
   const downloadResults = downloads.results || [];
   const dauResults = dau.results || [];
-  const totalDownloads = downloadResults.reduce((sum, r) => sum + r.count, 0);
+
+  // All-time total downloads (not limited by date range)
+  const allTimeDownloads = await env.DB.prepare(
+    `SELECT COUNT(*) as count FROM events WHERE app_id = ? AND event = 'first_launch'`
+  ).bind(appId).first<{ count: number }>();
+  const totalDownloads = allTimeDownloads?.count || 0;
+
   const avgDau = dauResults.length > 0
     ? Math.round(dauResults.reduce((sum, r) => sum + r.count, 0) / dauResults.length)
     : 0;

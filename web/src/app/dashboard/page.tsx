@@ -68,11 +68,11 @@ export default function DashboardPage() {
     fetchData(false);
   }, [fetchData]);
 
-  // Transform data for charts
+  // Transform data for charts — fill missing dates with 0
   const chartData = useMemo(() => {
     if (!stats) return [];
 
-    // Merge downloads and dau by date
+    // Build a map from API data (only contains dates with events)
     const dateMap = new Map<string, { date: string; downloads: number; dau: number }>();
 
     for (const item of stats.downloads.by_date) {
@@ -88,8 +88,23 @@ export default function DashboardPage() {
       }
     }
 
-    return Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [stats]);
+    // Generate complete date range, filling gaps with 0
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - days);
+
+    const result: { date: string; downloads: number; dau: number }[] = [];
+    const current = new Date(start.toISOString().split('T')[0]);
+    const endStr = end.toISOString().split('T')[0];
+
+    while (current.toISOString().split('T')[0] <= endStr) {
+      const dateStr = current.toISOString().split('T')[0];
+      result.push(dateMap.get(dateStr) || { date: dateStr, downloads: 0, dau: 0 });
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+
+    return result;
+  }, [stats, days]);
 
   // Format platform name for display
   const formatPlatformName = (platform: string | undefined): string => {
@@ -114,15 +129,20 @@ export default function DashboardPage() {
     }));
   }, [stats]);
 
-  // Calculate summary stats
+  // Calculate summary stats — match actual today's date, not last data point
   const summaryStats = useMemo(() => {
     if (!stats) {
       return { totalDownloads: 0, avgDau: 0, todayDau: 0, dauChange: 0 };
     }
 
+    const today = new Date().toISOString().split('T')[0];
+    const yesterdayDate = new Date();
+    yesterdayDate.setUTCDate(yesterdayDate.getUTCDate() - 1);
+    const yesterday = yesterdayDate.toISOString().split('T')[0];
+
     const dauByDate = stats.dau.by_date;
-    const todayDau = dauByDate.length > 0 ? dauByDate[dauByDate.length - 1].count : 0;
-    const yesterdayDau = dauByDate.length > 1 ? dauByDate[dauByDate.length - 2].count : 0;
+    const todayDau = dauByDate.find(d => d.date === today)?.count ?? 0;
+    const yesterdayDau = dauByDate.find(d => d.date === yesterday)?.count ?? 0;
     const dauChange = yesterdayDau > 0
       ? Number(((todayDau - yesterdayDau) / yesterdayDau * 100).toFixed(1))
       : 0;
