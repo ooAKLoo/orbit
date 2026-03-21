@@ -1,15 +1,5 @@
 // Mock 数据 - 每个 App 独立数据
 
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  avatar_url: string;
-  plan: 'free' | 'pro';
-  daily_limit: number;
-  retention_days: number;
-}
-
 export interface App {
   id: string;
   app_id: string;
@@ -49,17 +39,6 @@ export interface AppData {
   retention: RetentionStats;
   feedbacks: Feedback[];
 }
-
-// Mock 当前用户
-export const mockUser: User = {
-  id: 'user_001',
-  email: 'demo@example.com',
-  name: 'Demo User',
-  avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=demo',
-  plan: 'free',
-  daily_limit: 2000,
-  retention_days: 30,
-};
 
 // Mock 应用列表
 export const mockApps: App[] = [

@@ -92,39 +92,68 @@ export function DailyChart({ data, dataKey, title }: DailyChartProps) {
   );
 }
 
+interface BarListChartProps {
+  data: { label: string; count: number }[];
+  title: string;
+}
+
+function BarListChart({ data, title }: BarListChartProps) {
+  const total = data.reduce((sum, d) => sum + d.count, 0);
+
+  return (
+    <div className="bg-white rounded-2xl p-5 flex flex-col h-full min-h-0">
+      <h3 className="text-sm font-medium text-neutral-900 mb-4 flex-shrink-0">{title}</h3>
+      {data.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-sm text-neutral-300">暂无数据</div>
+      ) : (
+        <div className="space-y-3 flex-1 overflow-y-auto min-h-0">
+          {data.map((item) => {
+            const percentage = total > 0 ? ((item.count / total) * 100).toFixed(1) : '0';
+            return (
+              <div key={item.label}>
+                <div className="flex items-center justify-between text-sm mb-1.5">
+                  <span className="text-neutral-600">{item.label}</span>
+                  <span className="text-neutral-900 font-medium">
+                    {item.count.toLocaleString()}
+                  </span>
+                </div>
+                <div className="h-2 bg-[#f8f8f8] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-neutral-900 rounded-full transition-all duration-500"
+                    style={{ width: `${percentage}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface PlatformChartProps {
   data: PlatformStats[];
 }
 
 export function PlatformChart({ data }: PlatformChartProps) {
-  const total = data.reduce((sum, d) => sum + d.count, 0);
+  return <BarListChart data={data.map(d => ({ label: d.platform, count: d.count }))} title="平台分布" />;
+}
 
-  return (
-    <div className="bg-white rounded-2xl p-5 flex flex-col h-full min-h-0">
-      <h3 className="text-sm font-medium text-neutral-900 mb-4 flex-shrink-0">平台分布</h3>
-      <div className="space-y-3 flex-1 overflow-y-auto min-h-0">
-        {data.map((item) => {
-          const percentage = ((item.count / total) * 100).toFixed(1);
-          return (
-            <div key={item.platform}>
-              <div className="flex items-center justify-between text-sm mb-1.5">
-                <span className="text-neutral-600">{item.platform}</span>
-                <span className="text-neutral-900 font-medium">
-                  {item.count.toLocaleString()}
-                </span>
-              </div>
-              <div className="h-2 bg-[#f8f8f8] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-neutral-900 rounded-full transition-all duration-500"
-                  style={{ width: `${percentage}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+interface CountryChartProps {
+  data: { country: string; count: number }[];
+}
+
+const regionNames = typeof Intl !== 'undefined'
+  ? new Intl.DisplayNames(['zh'], { type: 'region' })
+  : null;
+
+export function CountryChart({ data }: CountryChartProps) {
+  const mapped = data.map(d => ({
+    label: regionNames ? (regionNames.of(d.country) || d.country) : d.country,
+    count: d.count,
+  }));
+  return <BarListChart data={mapped} title="国家/地区" />;
 }
 
 interface RetentionChartProps {

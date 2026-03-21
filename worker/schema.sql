@@ -46,8 +46,29 @@ CREATE TABLE IF NOT EXISTS feedbacks (
     FOREIGN KEY (app_id) REFERENCES applications(app_id)
 );
 
+-- 用户表
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT UNIQUE NOT NULL,         -- "github_12345" / "google_abc"
+    provider TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    email TEXT,
+    name TEXT,
+    avatar_url TEXT,
+    auth_token TEXT UNIQUE NOT NULL,
+    plan TEXT DEFAULT 'free',
+    daily_limit INTEGER DEFAULT 2000,
+    retention_days INTEGER DEFAULT 30,
+    created_at INTEGER DEFAULT (unixepoch()),
+    updated_at INTEGER DEFAULT (unixepoch())
+);
+
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_events_query ON events(app_id, event, timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_distinct ON events(app_id, distinct_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_versions_app_platform ON versions(app_id, platform, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feedbacks_app ON feedbacks(app_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_users_token ON users(auth_token);
+
+-- ALTER TABLE applications ADD COLUMN user_id TEXT REFERENCES users(user_id);
+-- Run via: wrangler d1 execute orbit-db --command "CREATE TABLE IF NOT EXISTS users (...); ALTER TABLE applications ADD COLUMN user_id TEXT REFERENCES users(user_id);"

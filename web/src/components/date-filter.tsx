@@ -1,7 +1,6 @@
 'use client';
 
-import { useState } from 'react';
-import { Calendar } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 type DateRange = '7d' | '14d' | '30d' | 'custom';
 
@@ -19,18 +18,27 @@ export function DateFilter({ value, onChange }: DateFilterProps) {
 
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center bg-white rounded-xl p-1">
+      <div className="flex items-center bg-white rounded-xl p-1 relative">
         {options.map((option) => (
           <button
             key={option.value}
             onClick={() => onChange(option.value)}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-              value === option.value
-                ? 'bg-[#f8f8f8] text-neutral-900'
-                : 'text-neutral-500 hover:text-neutral-700'
-            }`}
+            className="relative px-4 py-2 text-sm font-medium rounded-lg z-[1]"
           >
-            {option.label}
+            {value === option.value && (
+              <motion.div
+                layoutId="date-filter-indicator"
+                className="absolute inset-0 bg-[#f8f8f8] rounded-lg"
+                transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+              />
+            )}
+            <span
+              className={`relative z-[1] transition-colors duration-200 ${
+                value === option.value ? 'text-neutral-900' : 'text-neutral-500'
+              }`}
+            >
+              {option.label}
+            </span>
           </button>
         ))}
       </div>

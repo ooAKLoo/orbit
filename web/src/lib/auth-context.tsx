@@ -1,66 +1,78 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, mockUser } from './mock-data';
+import { SessionProvider, useSession, signIn, signOut } from 'next-auth/react';
+import { MotionConfig } from 'framer-motion';
+import { createContext, useContext, useEffect, ReactNode } from 'react';
+import { setAuthToken } from './api';
 
-// 硬编码的用户名密码
-const CREDENTIALS = {
-  username: 'admin',
-  password: 'orbit123',
-};
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  avatar_url: string;
+  plan: 'free' | 'pro';
+  daily_limit: number;
+  retention_days: number;
+  auth_token: string;
+}
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   login: (provider: 'google' | 'github') => void;
-  loginWithPassword: (username: string, password: string) => boolean;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+function AuthContextInner({ children }: { children: ReactNode }) {
+  const { data: session, status } = useSession();
+  const isLoading = status === 'loading';
+
+  const user: User | null = session?.authToken
+    ? {
+        id: session.userId || '',
+        email: session.user?.email || '',
+        name: session.user?.name || '',
+        avatar_url: session.user?.image || '',
+        plan: (session.plan as 'free' | 'pro') || 'free',
+        daily_limit: session.dailyLimit || 2000,
+        retention_days: session.retentionDays || 30,
+        auth_token: session.authToken,
+      }
+    : null;
 
   useEffect(() => {
-    // 模拟检查登录状态
-    const checkAuth = () => {
-      const isLoggedIn = localStorage.getItem('orbit_logged_in');
-      if (isLoggedIn === 'true') {
-        setUser(mockUser);
-      }
-      setIsLoading(false);
-    };
-
-    checkAuth();
-  }, []);
+    if (user?.auth_token) {
+      setAuthToken(user.auth_token);
+    } else {
+      setAuthToken(null);
+    }
+  }, [user?.auth_token]);
 
   const login = (provider: 'google' | 'github') => {
-    // Mock 登录 - 实际会跳转 OAuth
-    console.log(`Login with ${provider}`);
-    localStorage.setItem('orbit_logged_in', 'true');
-    setUser(mockUser);
-  };
-
-  const loginWithPassword = (username: string, password: string): boolean => {
-    if (username === CREDENTIALS.username && password === CREDENTIALS.password) {
-      localStorage.setItem('orbit_logged_in', 'true');
-      setUser(mockUser);
-      return true;
-    }
-    return false;
+    signIn(provider, { callbackUrl: '/dashboard' });
   };
 
   const logout = () => {
-    localStorage.removeItem('orbit_logged_in');
-    setUser(null);
+    setAuthToken(null);
+    signOut({ callbackUrl: '/login' });
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, loginWithPassword, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
+  );
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  return (
+    <SessionProvider>
+      <MotionConfig reducedMotion="user">
+        <AuthContextInner>{children}</AuthContextInner>
+      </MotionConfig>
+    </SessionProvider>
   );
 }
 

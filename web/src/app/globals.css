@@ -20,6 +20,10 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+button, [role="button"], a {
+  cursor: pointer;
+}
+
 /* 隐藏滚动条但保持功能 */
 .hide-scrollbar {
   -ms-overflow-style: none;

@@ -2,6 +2,7 @@ export interface Env {
   DB: D1Database;
   ENVIRONMENT: string;
   ADMIN_KEY?: string;
+  SYNC_SECRET?: string;
 }
 
 // Admin key for dashboard access (set in wrangler.toml or secrets)
@@ -11,7 +12,7 @@ const DEFAULT_ADMIN_KEY = 'orbit-admin-secret-key';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Admin-Key',
+  'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Admin-Key, X-Sync-Secret, Authorization',
 };
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -236,17 +237,21 @@ async function handleEventTrack(request: Request, env: Env, appId: string): Prom
     return errorResponse('Invalid event. Allowed: first_launch, app_open');
   }
 
+  // Get country from Cloudflare edge
+  const country = (request as Request & { cf?: { country?: string } }).cf?.country || null;
+
   // Insert event
   await env.DB.prepare(`
-    INSERT INTO events (app_id, distinct_id, event, platform, app_version, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO events (app_id, distinct_id, event, platform, app_version, timestamp, country)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).bind(
     appId,
     distinct_id,
     event,
     platform || null,
     app_version || null,
-    timestamp || Date.now()
+    timestamp || Date.now(),
+    country
   ).run();
 
   return jsonResponse({ success: true });
@@ -329,12 +334,12 @@ async function handleStats(request: Request, env: Env, appId: string, url: URL):
   const startTs = new Date(startDate).getTime();
   const endTs = new Date(endDate).getTime() + 86400000; // Include end date
 
-  // Downloads (first_launch events)
+  // Downloads (unique devices with first_launch)
   const downloads = await env.DB.prepare(`
     SELECT
       DATE(timestamp/1000, 'unixepoch') as date,
       platform,
-      COUNT(*) as count
+      COUNT(DISTINCT distinct_id) as count
     FROM events
     WHERE app_id = ? AND event = 'first_launch'
       AND timestamp >= ? AND timestamp < ?
@@ -367,9 +372,9 @@ async function handleStats(request: Request, env: Env, appId: string, url: URL):
     dateDownloads[row.date] = (dateDownloads[row.date] || 0) + row.count;
   }
 
-  // All-time total downloads (not limited by date range)
+  // All-time total downloads (unique devices)
   const allTimeDownloads = await env.DB.prepare(
-    `SELECT COUNT(*) as count FROM events WHERE app_id = ? AND event = 'first_launch'`
+    `SELECT COUNT(DISTINCT distinct_id) as count FROM events WHERE app_id = ? AND event = 'first_launch'`
   ).bind(appId).first<{ count: number }>();
   const totalDownloads = allTimeDownloads?.count || 0;
 
@@ -397,28 +402,37 @@ async function handleStats(request: Request, env: Env, appId: string, url: URL):
   });
 }
 
-async function calculateRetention(env: Env, appId: string, cohortDate: string): Promise<{ d1: number; d7: number; d30: number }> {
+async function calculateRetention(env: Env, appId: string, startDate: string): Promise<{ d1: number; d7: number; d30: number }> {
   const result: { d1: number; d7: number; d30: number } = { d1: 0, d7: 0, d30: 0 };
 
+  // Average retention across multiple cohort dates (last 7 days before startDate)
+  // This gives a more representative retention rate than a single day
   for (const [key, days] of [['d1', 1], ['d7', 7], ['d30', 30]] as const) {
     const retention = await env.DB.prepare(`
-      WITH cohort AS (
-        SELECT DISTINCT distinct_id
+      WITH cohort_dates AS (
+        SELECT DISTINCT DATE(timestamp/1000, 'unixepoch') as cohort_date
         FROM events
         WHERE app_id = ? AND event = 'first_launch'
-          AND DATE(timestamp/1000, 'unixepoch') = ?
+          AND DATE(timestamp/1000, 'unixepoch') BETWEEN DATE(?, '-6 days') AND ?
+      ),
+      cohort AS (
+        SELECT cd.cohort_date, e.distinct_id
+        FROM cohort_dates cd
+        JOIN events e ON DATE(e.timestamp/1000, 'unixepoch') = cd.cohort_date
+          AND e.app_id = ? AND e.event = 'first_launch'
+        GROUP BY cd.cohort_date, e.distinct_id
       ),
       retained AS (
-        SELECT DISTINCT distinct_id
-        FROM events
-        WHERE app_id = ? AND event = 'app_open'
-          AND DATE(timestamp/1000, 'unixepoch') = DATE(?, '+' || ? || ' days')
-          AND distinct_id IN (SELECT distinct_id FROM cohort)
+        SELECT DISTINCT c.cohort_date, c.distinct_id
+        FROM cohort c
+        JOIN events e ON e.distinct_id = c.distinct_id
+          AND e.app_id = ? AND e.event = 'app_open'
+          AND DATE(e.timestamp/1000, 'unixepoch') = DATE(c.cohort_date, '+' || ? || ' days')
       )
       SELECT
         (SELECT COUNT(*) FROM cohort) as cohort_size,
         (SELECT COUNT(*) FROM retained) as retained_count
-    `).bind(appId, cohortDate, appId, cohortDate, days).first<{ cohort_size: number; retained_count: number }>();
+    `).bind(appId, startDate, startDate, appId, appId, days).first<{ cohort_size: number; retained_count: number }>();
 
     if (retention && retention.cohort_size > 0) {
       result[key] = Math.round((retention.retained_count / retention.cohort_size) * 10000) / 10000;
@@ -527,96 +541,228 @@ function generateApiKey(): string {
   return key;
 }
 
-// ============ Admin APIs (for Dashboard) ============
+// ============ Auth Helpers ============
 
-async function handleAdminAPI(request: Request, env: Env, path: string, url: URL): Promise<Response> {
-  // Verify admin key
+// Generate auth token for users
+function generateAuthToken(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let token = 'oat_';
+  for (let i = 0; i < 32; i++) {
+    token += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return token;
+}
+
+// Authenticate admin requests - returns userId or error response
+async function authenticateAdmin(request: Request, env: Env): Promise<{ userId: string } | Response> {
+  // Try Bearer token first
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    const user = await env.DB.prepare(
+      'SELECT user_id FROM users WHERE auth_token = ?'
+    ).bind(token).first<{ user_id: string }>();
+
+    if (user) {
+      return { userId: user.user_id };
+    }
+  }
+
+  // Fallback to X-Admin-Key during transition
   const adminKey = request.headers.get('X-Admin-Key');
   const validAdminKey = env.ADMIN_KEY || DEFAULT_ADMIN_KEY;
+  if (adminKey === validAdminKey) {
+    return { userId: '__admin__' };
+  }
 
-  if (adminKey !== validAdminKey) {
+  return errorResponse('Unauthorized', 401);
+}
+
+// POST /admin/auth/sync - Server-to-server user sync
+async function handleAuthSync(request: Request, env: Env): Promise<Response> {
+  const syncSecret = request.headers.get('X-Sync-Secret');
+  if (!syncSecret || syncSecret !== env.SYNC_SECRET) {
     return errorResponse('Unauthorized', 401);
   }
 
+  const body = await request.json() as {
+    provider: string;
+    provider_id: string;
+    email?: string;
+    name?: string;
+    avatar_url?: string;
+  };
+
+  const { provider, provider_id, email, name, avatar_url } = body;
+  if (!provider || !provider_id) {
+    return errorResponse('Missing required fields: provider, provider_id');
+  }
+
+  const user_id = `${provider}_${provider_id}`;
+
+  // Check if user exists
+  const existing = await env.DB.prepare(
+    'SELECT auth_token, plan, daily_limit, retention_days FROM users WHERE user_id = ?'
+  ).bind(user_id).first<{
+    auth_token: string;
+    plan: string;
+    daily_limit: number;
+    retention_days: number;
+  }>();
+
+  if (existing) {
+    // Update profile info
+    await env.DB.prepare(`
+      UPDATE users SET email = ?, name = ?, avatar_url = ?, updated_at = unixepoch()
+      WHERE user_id = ?
+    `).bind(email || null, name || null, avatar_url || null, user_id).run();
+
+    return jsonResponse({
+      user_id,
+      auth_token: existing.auth_token,
+      plan: existing.plan,
+      daily_limit: existing.daily_limit,
+      retention_days: existing.retention_days,
+    });
+  }
+
+  // Create new user
+  const auth_token = generateAuthToken();
+  await env.DB.prepare(`
+    INSERT INTO users (user_id, provider, provider_id, email, name, avatar_url, auth_token)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).bind(user_id, provider, provider_id, email || null, name || null, avatar_url || null, auth_token).run();
+
+  return jsonResponse({
+    user_id,
+    auth_token,
+    plan: 'free',
+    daily_limit: 2000,
+    retention_days: 30,
+  });
+}
+
+// ============ Admin APIs (for Dashboard) ============
+
+async function handleAdminAPI(request: Request, env: Env, path: string, url: URL): Promise<Response> {
   const endpoint = path.replace('/admin/', '');
 
-  // Route to handlers
+  // Auth sync is server-to-server, uses X-Sync-Secret
+  if (endpoint === 'auth/sync' && request.method === 'POST') {
+    return handleAuthSync(request, env);
+  }
+
+  // Authenticate admin user
+  const authResult = await authenticateAdmin(request, env);
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+  const { userId } = authResult;
+
+  // GET /admin/usage - today's request count
+  if (endpoint === 'usage' && request.method === 'GET') {
+    return handleUsage(env, userId);
+  }
+
+  // List/Create apps
   if (endpoint === 'apps' || endpoint === 'apps/') {
     if (request.method === 'GET') {
-      return handleListApps(env);
+      return handleListApps(env, userId);
     }
     if (request.method === 'POST') {
-      return handleCreateApp(request, env);
+      return handleCreateApp(request, env, userId);
     }
   }
 
-  // /admin/apps/{app_id}/stats
-  const statsMatch = endpoint.match(/^apps\/([^\/]+)\/stats$/);
-  if (statsMatch) {
-    return handleAppStats(request, env, statsMatch[1], url);
-  }
+  // All routes below require an app_id - extract and verify ownership
+  const appIdMatch = endpoint.match(/^apps\/([^\/]+)/);
+  if (appIdMatch) {
+    const appId = appIdMatch[1];
 
-  // /admin/apps/{app_id}/feedbacks/{feedback_id}
-  const feedbackMatch = endpoint.match(/^apps\/([^\/]+)\/feedbacks\/(\d+)$/);
-  if (feedbackMatch) {
-    if (request.method === 'DELETE') {
-      return handleDeleteFeedback(env, feedbackMatch[1], parseInt(feedbackMatch[2]));
-    }
-  }
+    // Verify app ownership (skip for legacy __admin__)
+    if (userId !== '__admin__') {
+      const ownsApp = await env.DB.prepare(
+        'SELECT app_id FROM applications WHERE app_id = ? AND user_id = ?'
+      ).bind(appId, userId).first();
 
-  // /admin/apps/{app_id}/feedbacks
-  const feedbacksMatch = endpoint.match(/^apps\/([^\/]+)\/feedbacks$/);
-  if (feedbacksMatch) {
-    return handleAppFeedbacks(request, env, feedbacksMatch[1], url);
-  }
+      if (!ownsApp) {
+        return errorResponse('App not found', 404);
+      }
+    }
 
-  // /admin/apps/{app_id}/versions
-  const versionsMatch = endpoint.match(/^apps\/([^\/]+)\/versions$/);
-  if (versionsMatch) {
-    if (request.method === 'GET') {
-      return handleListVersions(env, versionsMatch[1]);
-    }
-    if (request.method === 'POST') {
-      return handleCreateVersion(request, env, versionsMatch[1]);
-    }
-  }
+    // Determine sub-path after app_id
+    const subPath = endpoint.slice(`apps/${appId}`.length).replace(/^\//, '');
 
-  // /admin/apps/{app_id}
-  const appMatch = endpoint.match(/^apps\/([^\/]+)$/);
-  if (appMatch) {
-    if (request.method === 'GET') {
-      return handleGetApp(env, appMatch[1]);
+    if (subPath === 'stats') {
+      return handleAppStats(request, env, appId, url);
     }
-    if (request.method === 'DELETE') {
-      return handleDeleteApp(env, appMatch[1]);
-    }
-    if (request.method === 'PATCH') {
-      return handleUpdateApp(request, env, appMatch[1]);
-    }
-  }
 
-  // /admin/apps/{app_id}/sync-github
-  const syncMatch = endpoint.match(/^apps\/([^\/]+)\/sync-github$/);
-  if (syncMatch && request.method === 'POST') {
-    return handleSyncGitHub(env, syncMatch[1]);
+    const feedbackDeleteMatch = subPath.match(/^feedbacks\/(\d+)$/);
+    if (feedbackDeleteMatch && request.method === 'DELETE') {
+      return handleDeleteFeedback(env, appId, parseInt(feedbackDeleteMatch[1]));
+    }
+
+    if (subPath === 'feedbacks') {
+      return handleAppFeedbacks(request, env, appId, url);
+    }
+
+    if (subPath === 'versions') {
+      if (request.method === 'GET') return handleListVersions(env, appId);
+      if (request.method === 'POST') return handleCreateVersion(request, env, appId);
+    }
+
+    if (subPath === 'sync-github' && request.method === 'POST') {
+      return handleSyncGitHub(env, appId);
+    }
+
+    // /admin/apps/{app_id} (no sub-path)
+    if (subPath === '') {
+      if (request.method === 'GET') return handleGetApp(env, appId);
+      if (request.method === 'DELETE') return handleDeleteApp(env, appId);
+      if (request.method === 'PATCH') return handleUpdateApp(request, env, appId);
+    }
   }
 
   return errorResponse('Not found', 404);
 }
 
+// GET /admin/usage
+async function handleUsage(env: Env, userId: string): Promise<Response> {
+  const todayStart = new Date();
+  todayStart.setUTCHours(0, 0, 0, 0);
+  const todayTs = todayStart.getTime();
+
+  const result = userId === '__admin__'
+    ? await env.DB.prepare(
+        `SELECT COUNT(*) as count FROM events WHERE timestamp >= ?`
+      ).bind(todayTs).first<{ count: number }>()
+    : await env.DB.prepare(
+        `SELECT COUNT(*) as count FROM events
+         WHERE app_id IN (SELECT app_id FROM applications WHERE user_id = ?)
+         AND timestamp >= ?`
+      ).bind(userId, todayTs).first<{ count: number }>();
+
+  return jsonResponse({ today: result?.count || 0 });
+}
+
 // GET /admin/apps
-async function handleListApps(env: Env): Promise<Response> {
-  const apps = await env.DB.prepare(`
-    SELECT id, app_id, app_name, api_key, github_repo, created_at
-    FROM applications
-    ORDER BY created_at DESC
-  `).all();
+async function handleListApps(env: Env, userId: string): Promise<Response> {
+  const apps = userId === '__admin__'
+    ? await env.DB.prepare(`
+        SELECT id, app_id, app_name, api_key, github_repo, created_at
+        FROM applications ORDER BY created_at DESC
+      `).all()
+    : await env.DB.prepare(`
+        SELECT id, app_id, app_name, api_key, github_repo, created_at
+        FROM applications WHERE user_id = ?
+        ORDER BY created_at DESC
+      `).bind(userId).all();
 
   return jsonResponse({ apps: apps.results });
 }
 
 // POST /admin/apps
-async function handleCreateApp(request: Request, env: Env): Promise<Response> {
+async function handleCreateApp(request: Request, env: Env, userId: string): Promise<Response> {
   const body = await request.json() as {
     app_id?: string;
     app_name?: string;
@@ -638,11 +784,12 @@ async function handleCreateApp(request: Request, env: Env): Promise<Response> {
   }
 
   const api_key = generateApiKey();
+  const effectiveUserId = userId === '__admin__' ? null : userId;
 
   await env.DB.prepare(`
-    INSERT INTO applications (app_id, app_name, api_key)
-    VALUES (?, ?, ?)
-  `).bind(app_id, app_name, api_key).run();
+    INSERT INTO applications (app_id, app_name, api_key, user_id)
+    VALUES (?, ?, ?, ?)
+  `).bind(app_id, app_name, api_key, effectiveUserId).run();
 
   return jsonResponse({
     success: true,
@@ -901,11 +1048,11 @@ async function handleAppStats(request: Request, env: Env, appId: string, url: UR
   const startTs = new Date(startDate).getTime();
   const endTs = new Date(endDate).getTime() + 86400000;
 
-  // Downloads by date
+  // Downloads by date (unique devices)
   const downloads = await env.DB.prepare(`
     SELECT
       DATE(timestamp/1000, 'unixepoch') as date,
-      COUNT(*) as count
+      COUNT(DISTINCT distinct_id) as count
     FROM events
     WHERE app_id = ? AND event = 'first_launch'
       AND timestamp >= ? AND timestamp < ?
@@ -913,11 +1060,11 @@ async function handleAppStats(request: Request, env: Env, appId: string, url: UR
     ORDER BY date
   `).bind(appId, startTs, endTs).all<{ date: string; count: number }>();
 
-  // Downloads by platform
+  // Downloads by platform (unique devices)
   const platformStats = await env.DB.prepare(`
     SELECT
       platform,
-      COUNT(*) as count
+      COUNT(DISTINCT distinct_id) as count
     FROM events
     WHERE app_id = ? AND event = 'first_launch'
       AND timestamp >= ? AND timestamp < ?
@@ -936,6 +1083,18 @@ async function handleAppStats(request: Request, env: Env, appId: string, url: UR
     ORDER BY date
   `).bind(appId, startTs, endTs).all<{ date: string; count: number }>();
 
+  // Country stats (unique users by country)
+  const countryStats = await env.DB.prepare(`
+    SELECT
+      country,
+      COUNT(DISTINCT distinct_id) as count
+    FROM events
+    WHERE app_id = ? AND country IS NOT NULL
+      AND timestamp >= ? AND timestamp < ?
+    GROUP BY country
+    ORDER BY count DESC
+  `).bind(appId, startTs, endTs).all<{ country: string; count: number }>();
+
   // Calculate retention
   const retention = await calculateRetention(env, appId, startDate);
 
@@ -943,9 +1102,9 @@ async function handleAppStats(request: Request, env: Env, appId: string, url: UR
   const downloadResults = downloads.results || [];
   const dauResults = dau.results || [];
 
-  // All-time total downloads (not limited by date range)
+  // All-time total downloads (unique devices)
   const allTimeDownloads = await env.DB.prepare(
-    `SELECT COUNT(*) as count FROM events WHERE app_id = ? AND event = 'first_launch'`
+    `SELECT COUNT(DISTINCT distinct_id) as count FROM events WHERE app_id = ? AND event = 'first_launch'`
   ).bind(appId).first<{ count: number }>();
   const totalDownloads = allTimeDownloads?.count || 0;
 
@@ -959,6 +1118,7 @@ async function handleAppStats(request: Request, env: Env, appId: string, url: UR
       by_date: downloadResults,
     },
     platform_stats: platformStats.results || [],
+    country_stats: countryStats.results || [],
     dau: {
       avg: avgDau,
       by_date: dauResults,

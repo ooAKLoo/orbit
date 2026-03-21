@@ -2,30 +2,34 @@
 
 import { useAuth } from '@/lib/auth-context';
 import { useApp } from '@/lib/app-context';
+import { getUsage } from '@/lib/api';
+import { GnomeLogo } from '@/components/gnome-logo';
+import { motion, AnimatePresence } from 'framer-motion';
 import { LogOut, Plus, ChevronDown, Settings, Code, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
 
 export function Sidebar() {
   const { user, logout } = useAuth();
   const { apps, selectedApp, selectedAppId, setSelectedAppId, isLoading } = useApp();
+  const router = useRouter();
   const [showApps, setShowApps] = useState(false);
+  const [todayUsage, setTodayUsage] = useState(0);
+
+  useEffect(() => {
+    if (user?.auth_token) {
+      getUsage().then(data => setTodayUsage(data.today)).catch(() => {});
+    }
+  }, [user?.auth_token]);
 
   return (
     <aside className="w-64 h-screen bg-[#f8f8f8] flex flex-col">
       {/* Logo */}
       <div className="p-5">
         <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-neutral-900 flex items-center justify-center">
-            <svg
-              className="w-5 h-5 text-white"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <circle cx="12" cy="12" r="10" strokeWidth="2" />
-              <circle cx="12" cy="12" r="4" strokeWidth="2" />
-            </svg>
+          <div className="w-9 h-9 rounded-xl bg-neutral-900 flex items-center justify-center text-white">
+            <GnomeLogo className="w-5 h-5" />
           </div>
           <span className="text-lg font-semibold text-neutral-900">Orbit</span>
         </Link>
@@ -50,7 +54,15 @@ export function Sidebar() {
           />
         </button>
 
+        <AnimatePresence>
         {showApps && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            className="overflow-hidden"
+          >
           <div className="mt-2 p-2 bg-white rounded-xl space-y-1">
             {isLoading ? (
               <div className="flex items-center justify-center py-4">
@@ -69,7 +81,7 @@ export function Sidebar() {
                 }`}
               >
                 <button
-                  onClick={() => setSelectedAppId(app.app_id)}
+                  onClick={() => { setSelectedAppId(app.app_id); router.push('/dashboard'); }}
                   className={`flex-1 px-3 py-2 text-left text-sm ${
                     app.app_id === selectedAppId
                       ? 'text-neutral-900'
@@ -95,7 +107,9 @@ export function Sidebar() {
               添加应用
             </Link>
           </div>
+          </motion.div>
         )}
+        </AnimatePresence>
       </div>
 
       {/* 占位区域 */}
@@ -111,7 +125,7 @@ export function Sidebar() {
             </span>
           </div>
           <div className="flex items-baseline gap-1">
-            <span className="text-lg font-semibold text-neutral-900">1,234</span>
+            <span className="text-lg font-semibold text-neutral-900">{todayUsage.toLocaleString()}</span>
             <span className="text-xs text-neutral-400">
               / {user?.daily_limit.toLocaleString()}
             </span>
@@ -119,7 +133,7 @@ export function Sidebar() {
           <div className="mt-2 h-1.5 bg-[#f8f8f8] rounded-full overflow-hidden">
             <div
               className="h-full bg-neutral-900 rounded-full"
-              style={{ width: `${(1234 / (user?.daily_limit || 2000)) * 100}%` }}
+              style={{ width: `${Math.min((todayUsage / (user?.daily_limit || 2000)) * 100, 100)}%` }}
             />
           </div>
         </div>
@@ -145,12 +159,14 @@ export function Sidebar() {
           >
             <Settings className="w-4 h-4" />
           </Link>
-          <button
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 30 }}
             onClick={logout}
             className="p-2 text-neutral-400 hover:text-neutral-600 rounded-lg hover:bg-white transition-colors"
           >
             <LogOut className="w-4 h-4" />
-          </button>
+          </motion.button>
         </div>
       </div>
     </aside>

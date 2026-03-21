@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Clock, MessageSquare, Maximize2, X, Trash2, Copy, Check } from 'lucide-react';
 import { Feedback, deleteFeedback } from '@/lib/api';
 
@@ -194,8 +195,20 @@ export function FeedbackCard({ feedbacks, appId, onFeedbackDeleted }: FeedbackCa
 
   // Fullscreen modal view
   const FullscreenView = () => (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8">
-      <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-8"
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.97, y: 8 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-neutral-100 flex-shrink-0">
           <div>
@@ -236,14 +249,16 @@ export function FeedbackCard({ feedbacks, appId, onFeedbackDeleted }: FeedbackCa
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 
   return (
     <>
       <CompactView />
-      {isFullscreen && <FullscreenView />}
+      <AnimatePresence>
+        {isFullscreen && <FullscreenView />}
+      </AnimatePresence>
     </>
   );
 }

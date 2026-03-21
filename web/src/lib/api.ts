@@ -1,7 +1,13 @@
 // Orbit API Client
 
-const API_BASE = 'https://orbit-api.yangdongjuooakloo.workers.dev';
-const ADMIN_KEY = 'orbit-admin-secret-key';
+const API_BASE = process.env.NEXT_PUBLIC_ORBIT_API_URL || 'https://orbit-api.yangdongjuooakloo.workers.dev';
+
+// Auth token management
+let _authToken: string | null = null;
+
+export function setAuthToken(token: string | null) {
+  _authToken = token;
+}
 
 // Types
 export interface App {
@@ -29,12 +35,18 @@ export interface RetentionStats {
   d30: number;
 }
 
+export interface CountryStats {
+  country: string;
+  count: number;
+}
+
 export interface AppStats {
   downloads: {
     total: number;
     by_date: DailyStats[];
   };
   platform_stats: PlatformStats[];
+  country_stats: CountryStats[];
   dau: {
     avg: number;
     by_date: DailyStats[];
@@ -71,11 +83,18 @@ export class ApiError extends Error {
 
 // Fetch helper
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (_authToken) {
+    headers['Authorization'] = `Bearer ${_authToken}`;
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
-      'X-Admin-Key': ADMIN_KEY,
+      ...headers,
       ...options?.headers,
     },
   });
@@ -178,6 +197,12 @@ export async function updateApp(
     method: 'PATCH',
     body: JSON.stringify(updates),
   });
+}
+
+// ============ Usage API ============
+
+export async function getUsage(): Promise<{ today: number }> {
+  return fetchApi('/admin/usage');
 }
 
 // ============ GitHub Sync API ============

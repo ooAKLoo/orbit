@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Download, Users, RefreshCw, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Download, Users, Activity, RefreshCw, Loader2 } from 'lucide-react';
 import { StatsCard } from '@/components/stats-card';
-import { DailyChart, PlatformChart, RetentionChart } from '@/components/charts';
+import { DailyChart, PlatformChart, RetentionChart, CountryChart } from '@/components/charts';
 import { FeedbackCard } from '@/components/feedback-card';
 import { DateFilter } from '@/components/date-filter';
 import { useApp } from '@/lib/app-context';
@@ -212,6 +213,7 @@ export default function DashboardPage() {
               title="总下载量"
               value={summaryStats.totalDownloads}
               icon={<Download className="w-5 h-5" />}
+              index={0}
             />
             <StatsCard
               title="今日活跃用户"
@@ -219,28 +221,50 @@ export default function DashboardPage() {
               change={summaryStats.dauChange}
               changeLabel="vs 昨日"
               icon={<Users className="w-5 h-5" />}
+              index={1}
             />
             <StatsCard
               title="平均日活"
               value={summaryStats.avgDau}
-              icon={<RefreshCw className="w-5 h-5" />}
+              icon={<Activity className="w-5 h-5" />}
+              index={2}
             />
           </div>
 
           {/* 图表区域 */}
           <div className="grid grid-cols-2 gap-5 mb-8 flex-shrink-0">
-            <DailyChart
-              data={chartData}
-              dataKey="downloads"
-              title="每日下载量"
-            />
-            <DailyChart data={chartData} dataKey="dau" title="每日活跃用户" />
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: 'easeOut', delay: 0.15 }}
+            >
+              <DailyChart
+                data={chartData}
+                dataKey="downloads"
+                title="每日下载量"
+              />
+            </motion.div>
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, ease: 'easeOut', delay: 0.2 }}
+            >
+              <DailyChart data={chartData} dataKey="dau" title="每日活跃用户" />
+            </motion.div>
           </div>
 
-          {/* 留存、平台分布、用户反馈 - 自适应填充剩余空间 */}
-          <div className="grid grid-cols-3 gap-5 flex-1 min-h-0">
-            <RetentionChart data={stats?.retention || { d1: 0, d7: 0, d30: 0 }} />
-            <PlatformChart data={platformData} />
+          {/* 留存、平台分布、国家分布、用户反馈 */}
+          <div className="grid grid-cols-4 gap-5 flex-1 min-h-0">
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut', delay: 0.25 }} className="min-h-0">
+              <RetentionChart data={stats?.retention || { d1: 0, d7: 0, d30: 0 }} />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut', delay: 0.3 }} className="min-h-0">
+              <PlatformChart data={platformData} />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut', delay: 0.35 }} className="min-h-0">
+              <CountryChart data={stats?.country_stats || []} />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut', delay: 0.4 }} className="min-h-0">
             <FeedbackCard
               feedbacks={feedbacks}
               appId={selectedAppId!}
@@ -248,6 +272,7 @@ export default function DashboardPage() {
                 setFeedbacks((prev) => prev.filter((f) => f.id !== feedbackId));
               }}
             />
+            </motion.div>
           </div>
         </div>
       )}

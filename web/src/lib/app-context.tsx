@@ -1,7 +1,8 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { App, listApps, createApp as apiCreateApp, deleteApp as apiDeleteApp } from './api';
+import { App, listApps, createApp as apiCreateApp, deleteApp as apiDeleteApp, setAuthToken } from './api';
+import { useAuth } from './auth-context';
 
 interface AppContextType {
   apps: App[];
@@ -18,6 +19,7 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
   const [apps, setApps] = useState<App[]>([]);
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,8 +45,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [selectedAppId]);
 
   useEffect(() => {
-    refreshApps();
-  }, []);
+    if (user?.auth_token) {
+      setAuthToken(user.auth_token);
+      refreshApps();
+    }
+  }, [user?.auth_token]);
 
   const createApp = async (appId: string, appName: string): Promise<App> => {
     const newApp = await apiCreateApp(appId, appName);

@@ -1,5 +1,6 @@
 'use client';
 
+import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { ReactNode } from 'react';
 
@@ -10,6 +11,7 @@ interface StatsCardProps {
   changeLabel?: string;
   icon?: ReactNode;
   size?: 'default' | 'large';
+  index?: number;
 }
 
 export function StatsCard({
@@ -19,11 +21,17 @@ export function StatsCard({
   changeLabel,
   icon,
   size = 'default',
+  index = 0,
 }: StatsCardProps) {
   const isPositive = change !== undefined && change >= 0;
 
   return (
-    <div className="bg-white rounded-2xl p-5">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: 'easeOut', delay: index * 0.05 }}
+      className="bg-white rounded-2xl p-5"
+    >
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm text-neutral-400 mb-1">{title}</p>
@@ -61,6 +69,6 @@ export function StatsCard({
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }

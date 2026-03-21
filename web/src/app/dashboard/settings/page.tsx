@@ -1,6 +1,8 @@
 'use client';
 
 import { useAuth } from '@/lib/auth-context';
+import { ArrowLeft } from 'lucide-react';
+import Link from 'next/link';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -9,6 +11,13 @@ export default function SettingsPage() {
     <div className="max-w-2xl">
       {/* 页面标题 */}
       <div className="mb-8">
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-1.5 text-sm text-neutral-400 hover:text-neutral-600 transition-colors mb-4"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          返回
+        </Link>
         <h1 className="text-2xl font-semibold text-neutral-900">设置</h1>
         <p className="text-neutral-400 mt-1">管理你的账户</p>
       </div>
