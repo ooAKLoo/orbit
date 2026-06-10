@@ -67,6 +67,13 @@ await Orbit.sendFeedback({
   content: 'Great app! Would love to see dark mode.',
   contact: 'user@example.com',  // Optional
 });
+
+// With attachments, the SDK sends multipart/form-data.
+await Orbit.sendFeedback({
+  content: 'Here is my resume.',
+  contact: 'user@example.com',
+  attachments: [resumeFile],
+});
 ```
 
 ## Platform Support

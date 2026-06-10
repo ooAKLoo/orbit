@@ -3,16 +3,42 @@ export interface Env {
   ENVIRONMENT: string;
   ADMIN_KEY?: string;
   SYNC_SECRET?: string;
+  FEEDBACK_FILES?: R2Bucket;
 }
 
 // Admin key for dashboard access (set in wrangler.toml or secrets)
 const DEFAULT_ADMIN_KEY = 'orbit-admin-secret-key';
+const MAX_FEEDBACK_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const MAX_FEEDBACK_ATTACHMENT_COUNT = 5;
+
+interface PublicFeedbackAttachment {
+  id: number;
+  feedback_id: number;
+  file_name: string;
+  file_type: string | null;
+  file_size: number;
+  created_at: number;
+}
+
+interface FeedbackAttachmentRow extends PublicFeedbackAttachment {
+  object_key: string;
+}
+
+interface FeedbackRow {
+  id: number;
+  content: string;
+  contact: string | null;
+  device_info: string | null;
+  created_at: number;
+  attachments?: PublicFeedbackAttachment[];
+}
 
 // CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Admin-Key, X-Sync-Secret, Authorization',
+  'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
 };
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -263,19 +289,26 @@ async function handleFeedback(request: Request, env: Env, appId: string): Promis
     return errorResponse('Method not allowed', 405);
   }
 
-  const body = await request.json() as {
-    content?: string;
-    contact?: string;
-    device_info?: object;
-  };
-
-  const { content, contact, device_info } = body;
+  const { content, contact, device_info, attachments } = await parseFeedbackRequest(request);
 
   if (!content) {
     return errorResponse('Missing required field: content');
   }
 
-  await env.DB.prepare(`
+  if (attachments.length > MAX_FEEDBACK_ATTACHMENT_COUNT) {
+    return errorResponse(`Too many attachments. Maximum is ${MAX_FEEDBACK_ATTACHMENT_COUNT}`);
+  }
+
+  const totalAttachmentSize = attachments.reduce((total, file) => total + file.size, 0);
+  if (totalAttachmentSize > MAX_FEEDBACK_ATTACHMENT_BYTES) {
+    return errorResponse('Attachment total size exceeds 15MB');
+  }
+
+  if (attachments.length > 0 && !env.FEEDBACK_FILES) {
+    return errorResponse('Feedback file storage is not configured', 503);
+  }
+
+  const insertResult = await env.DB.prepare(`
     INSERT INTO feedbacks (app_id, content, contact, device_info)
     VALUES (?, ?, ?, ?)
   `).bind(
@@ -285,7 +318,186 @@ async function handleFeedback(request: Request, env: Env, appId: string): Promis
     device_info ? JSON.stringify(device_info) : null
   ).run();
 
-  return jsonResponse({ success: true });
+  const feedbackId = Number((insertResult.meta as { last_row_id?: number }).last_row_id);
+  if (!Number.isFinite(feedbackId) || feedbackId <= 0) {
+    return errorResponse('Failed to create feedback', 500);
+  }
+
+  const storedAttachments: PublicFeedbackAttachment[] = [];
+
+  try {
+    for (const file of attachments) {
+      const fileName = sanitizeFileName(file.name || 'attachment');
+      const objectKey = buildFeedbackObjectKey(appId, feedbackId, fileName);
+      const fileType = file.type || 'application/octet-stream';
+
+      await env.FEEDBACK_FILES!.put(objectKey, file.stream(), {
+        httpMetadata: { contentType: fileType },
+        customMetadata: {
+          app_id: appId,
+          feedback_id: String(feedbackId),
+          file_name: fileName,
+        },
+      });
+
+      const attachmentResult = await env.DB.prepare(`
+        INSERT INTO feedback_attachments (feedback_id, app_id, object_key, file_name, file_type, file_size)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).bind(feedbackId, appId, objectKey, fileName, fileType, file.size).run();
+
+      storedAttachments.push({
+        id: Number((attachmentResult.meta as { last_row_id?: number }).last_row_id),
+        feedback_id: feedbackId,
+        file_name: fileName,
+        file_type: fileType,
+        file_size: file.size,
+        created_at: Math.floor(Date.now() / 1000),
+      });
+    }
+  } catch (error) {
+    console.error('Failed to store feedback attachment:', error);
+    await deleteFeedbackAttachmentObjects(env, appId, feedbackId);
+    await env.DB.prepare('DELETE FROM feedback_attachments WHERE feedback_id = ? AND app_id = ?')
+      .bind(feedbackId, appId)
+      .run();
+    await env.DB.prepare('DELETE FROM feedbacks WHERE id = ? AND app_id = ?')
+      .bind(feedbackId, appId)
+      .run();
+    return errorResponse('Failed to store attachment', 500);
+  }
+
+  return jsonResponse({ success: true, feedback_id: feedbackId, attachments: storedAttachments });
+}
+
+async function parseFeedbackRequest(request: Request): Promise<{
+  content?: string;
+  contact?: string;
+  device_info?: object;
+  attachments: File[];
+}> {
+  const contentType = request.headers.get('Content-Type') || '';
+
+  if (contentType.includes('multipart/form-data')) {
+    const formData = await request.formData();
+    return {
+      content: getFormString(formData.get('content')),
+      contact: getFormString(formData.get('contact')),
+      device_info: parseDeviceInfo(getFormString(formData.get('device_info'))),
+      attachments: (formData.getAll('attachments') as unknown[]).filter(isUploadedFile),
+    };
+  }
+
+  const body = await request.json() as {
+    content?: string;
+    contact?: string;
+    device_info?: object;
+  };
+
+  return {
+    content: body.content,
+    contact: body.contact,
+    device_info: body.device_info,
+    attachments: [],
+  };
+}
+
+function getFormString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function isUploadedFile(value: unknown): value is File {
+  return value instanceof File && value.size > 0;
+}
+
+function parseDeviceInfo(value: string | undefined): object | undefined {
+  if (!value) return undefined;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sanitizeFileName(fileName: string): string {
+  const backslash = String.fromCharCode(92);
+  const sanitized = Array.from(fileName)
+    .map((char) => (char === '/' || char === backslash || char.charCodeAt(0) < 32 ? '_' : char))
+    .join('')
+    .trim();
+  return sanitized || 'attachment';
+}
+
+function buildFeedbackObjectKey(appId: string, feedbackId: number, fileName: string): string {
+  const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `feedback/${appId}/${feedbackId}/${id}-${fileName}`;
+}
+
+function buildContentDisposition(fileName: string): string {
+  const fallback = sanitizeFileName(fileName).replace(/"/g, '');
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+async function listFeedbacksWithAttachments(
+  env: Env,
+  appId: string,
+  limit: number,
+  offset: number
+): Promise<FeedbackRow[]> {
+  const feedbacks = await env.DB.prepare(`
+    SELECT id, content, contact, device_info, created_at
+    FROM feedbacks
+    WHERE app_id = ?
+    ORDER BY created_at DESC
+    LIMIT ? OFFSET ?
+  `).bind(appId, limit, offset).all<FeedbackRow>();
+
+  const rows = feedbacks.results || [];
+  for (const feedback of rows) {
+    feedback.attachments = [];
+  }
+
+  if (rows.length === 0) {
+    return rows;
+  }
+
+  const ids = rows.map((feedback) => feedback.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const attachments = await env.DB.prepare(`
+    SELECT id, feedback_id, file_name, file_type, file_size, created_at
+    FROM feedback_attachments
+    WHERE app_id = ? AND feedback_id IN (${placeholders})
+    ORDER BY created_at ASC
+  `).bind(appId, ...ids).all<PublicFeedbackAttachment>();
+
+  const byFeedbackId = new Map<number, PublicFeedbackAttachment[]>();
+  for (const attachment of attachments.results || []) {
+    const list = byFeedbackId.get(attachment.feedback_id) || [];
+    list.push(attachment);
+    byFeedbackId.set(attachment.feedback_id, list);
+  }
+
+  for (const feedback of rows) {
+    feedback.attachments = byFeedbackId.get(feedback.id) || [];
+  }
+
+  return rows;
+}
+
+async function deleteFeedbackAttachmentObjects(env: Env, appId: string, feedbackId?: number): Promise<void> {
+  if (!env.FEEDBACK_FILES) {
+    return;
+  }
+
+  const query = feedbackId
+    ? env.DB.prepare('SELECT object_key FROM feedback_attachments WHERE app_id = ? AND feedback_id = ?').bind(appId, feedbackId)
+    : env.DB.prepare('SELECT object_key FROM feedback_attachments WHERE app_id = ?').bind(appId);
+  const attachments = await query.all<{ object_key: string }>();
+
+  await Promise.all((attachments.results || []).map((attachment) => (
+    env.FEEDBACK_FILES!.delete(attachment.object_key)
+  )));
 }
 
 // ============ Management APIs ============
@@ -489,20 +701,14 @@ async function handleFeedbacksList(request: Request, env: Env, appId: string, ur
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100);
   const offset = (page - 1) * limit;
 
-  const feedbacks = await env.DB.prepare(`
-    SELECT id, content, contact, device_info, created_at
-    FROM feedbacks
-    WHERE app_id = ?
-    ORDER BY created_at DESC
-    LIMIT ? OFFSET ?
-  `).bind(appId, limit, offset).all();
+  const feedbacks = await listFeedbacksWithAttachments(env, appId, limit, offset);
 
   const total = await env.DB.prepare('SELECT COUNT(*) as count FROM feedbacks WHERE app_id = ?')
     .bind(appId)
     .first<{ count: number }>();
 
   return jsonResponse({
-    feedbacks: feedbacks.results,
+    feedbacks,
     pagination: {
       page,
       limit,
@@ -697,6 +903,17 @@ async function handleAdminAPI(request: Request, env: Env, path: string, url: URL
       return handleAppStats(request, env, appId, url);
     }
 
+    const attachmentDownloadMatch = subPath.match(/^feedbacks\/(\d+)\/attachments\/(\d+)$/);
+    if (attachmentDownloadMatch) {
+      return handleDownloadFeedbackAttachment(
+        request,
+        env,
+        appId,
+        parseInt(attachmentDownloadMatch[1]),
+        parseInt(attachmentDownloadMatch[2])
+      );
+    }
+
     const feedbackDeleteMatch = subPath.match(/^feedbacks\/(\d+)$/);
     if (feedbackDeleteMatch && request.method === 'DELETE') {
       return handleDeleteFeedback(env, appId, parseInt(feedbackDeleteMatch[1]));
@@ -856,6 +1073,7 @@ async function handleUpdateApp(request: Request, env: Env, appId: string): Promi
     await env.DB.batch([
       env.DB.prepare('UPDATE events SET app_id = ? WHERE app_id = ?').bind(newAppId, appId),
       env.DB.prepare('UPDATE feedbacks SET app_id = ? WHERE app_id = ?').bind(newAppId, appId),
+      env.DB.prepare('UPDATE feedback_attachments SET app_id = ? WHERE app_id = ?').bind(newAppId, appId),
       env.DB.prepare('UPDATE versions SET app_id = ? WHERE app_id = ?').bind(newAppId, appId),
       env.DB.prepare(`UPDATE applications SET ${appUpdates.join(', ')} WHERE app_id = ?`).bind(...appValues),
     ]);
@@ -893,7 +1111,9 @@ async function handleUpdateApp(request: Request, env: Env, appId: string): Promi
 // DELETE /admin/apps/{app_id}
 async function handleDeleteApp(env: Env, appId: string): Promise<Response> {
   // Delete related data first
+  await deleteFeedbackAttachmentObjects(env, appId);
   await env.DB.prepare('DELETE FROM events WHERE app_id = ?').bind(appId).run();
+  await env.DB.prepare('DELETE FROM feedback_attachments WHERE app_id = ?').bind(appId).run();
   await env.DB.prepare('DELETE FROM feedbacks WHERE app_id = ?').bind(appId).run();
   await env.DB.prepare('DELETE FROM versions WHERE app_id = ?').bind(appId).run();
   await env.DB.prepare('DELETE FROM applications WHERE app_id = ?').bind(appId).run();
@@ -1129,6 +1349,11 @@ async function handleAppStats(request: Request, env: Env, appId: string, url: UR
 
 // DELETE /admin/apps/{app_id}/feedbacks/{feedback_id}
 async function handleDeleteFeedback(env: Env, appId: string, feedbackId: number): Promise<Response> {
+  await deleteFeedbackAttachmentObjects(env, appId, feedbackId);
+  await env.DB.prepare('DELETE FROM feedback_attachments WHERE feedback_id = ? AND app_id = ?')
+    .bind(feedbackId, appId)
+    .run();
+
   const result = await env.DB.prepare(
     'DELETE FROM feedbacks WHERE id = ? AND app_id = ?'
   ).bind(feedbackId, appId).run();
@@ -1138,6 +1363,46 @@ async function handleDeleteFeedback(env: Env, appId: string, feedbackId: number)
   }
 
   return jsonResponse({ success: true });
+}
+
+async function handleDownloadFeedbackAttachment(
+  request: Request,
+  env: Env,
+  appId: string,
+  feedbackId: number,
+  attachmentId: number
+): Promise<Response> {
+  if (request.method !== 'GET') {
+    return errorResponse('Method not allowed', 405);
+  }
+
+  if (!env.FEEDBACK_FILES) {
+    return errorResponse('Feedback file storage is not configured', 503);
+  }
+
+  const attachment = await env.DB.prepare(`
+    SELECT id, feedback_id, object_key, file_name, file_type, file_size, created_at
+    FROM feedback_attachments
+    WHERE id = ? AND feedback_id = ? AND app_id = ?
+  `).bind(attachmentId, feedbackId, appId).first<FeedbackAttachmentRow>();
+
+  if (!attachment) {
+    return errorResponse('Attachment not found', 404);
+  }
+
+  const object = await env.FEEDBACK_FILES.get(attachment.object_key);
+  if (!object) {
+    return errorResponse('Attachment file not found', 404);
+  }
+
+  const headers = new Headers(corsHeaders);
+  object.writeHttpMetadata(headers);
+  headers.set('Content-Type', attachment.file_type || 'application/octet-stream');
+  headers.set('Content-Length', String(attachment.file_size));
+  headers.set('Content-Disposition', buildContentDisposition(attachment.file_name));
+  headers.set('Cache-Control', 'private, max-age=60');
+
+  return new Response(object.body, { headers });
 }
 
 // GET /admin/apps/{app_id}/feedbacks
@@ -1150,20 +1415,14 @@ async function handleAppFeedbacks(request: Request, env: Env, appId: string, url
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100);
   const offset = (page - 1) * limit;
 
-  const feedbacks = await env.DB.prepare(`
-    SELECT id, content, contact, device_info, created_at
-    FROM feedbacks
-    WHERE app_id = ?
-    ORDER BY created_at DESC
-    LIMIT ? OFFSET ?
-  `).bind(appId, limit, offset).all();
+  const feedbacks = await listFeedbacksWithAttachments(env, appId, limit, offset);
 
   const total = await env.DB.prepare('SELECT COUNT(*) as count FROM feedbacks WHERE app_id = ?')
     .bind(appId)
     .first<{ count: number }>();
 
   return jsonResponse({
-    feedbacks: feedbacks.results,
+    feedbacks,
     pagination: {
       page,
       limit,

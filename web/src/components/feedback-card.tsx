@@ -2,8 +2,8 @@
 
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Clock, MessageSquare, Maximize2, X, Trash2, Copy, Check } from 'lucide-react';
-import { Feedback, deleteFeedback } from '@/lib/api';
+import { Mail, Clock, MessageSquare, Maximize2, X, Trash2, Copy, Check, Paperclip, Download, Loader2 } from 'lucide-react';
+import { Feedback, FeedbackAttachment, deleteFeedback, downloadFeedbackAttachment } from '@/lib/api';
 
 interface FeedbackCardProps {
   feedbacks: Feedback[];
@@ -19,6 +19,7 @@ export function FeedbackCard({ feedbacks, appId, onFeedbackDeleted }: FeedbackCa
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<number | null>(null);
 
   // Group feedbacks by date (YYYY-MM-DD)
   const groupedFeedbacks = useMemo(() => {
@@ -70,14 +71,51 @@ export function FeedbackCard({ feedbacks, appId, onFeedbackDeleted }: FeedbackCa
   const handleCopy = async (feedback: Feedback, e?: React.MouseEvent) => {
     e?.stopPropagation();
     try {
+      const attachmentText = feedback.attachments?.length
+        ? `\n\n附件: ${feedback.attachments.map((attachment) => attachment.file_name).join(', ')}`
+        : '';
       const text = feedback.contact
-        ? `${feedback.content}\n\n联系方式: ${feedback.contact}`
-        : feedback.content;
+        ? `${feedback.content}\n\n联系方式: ${feedback.contact}${attachmentText}`
+        : `${feedback.content}${attachmentText}`;
       await navigator.clipboard.writeText(text);
       setCopiedId(feedback.id);
       setTimeout(() => setCopiedId(null), 2000);
     } catch (err) {
       console.error('Failed to copy:', err);
+    }
+  };
+
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024 * 1024) {
+      return `${Math.max(1, Math.round(bytes / 1024))}KB`;
+    }
+
+    return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  };
+
+  const handleDownloadAttachment = async (
+    feedback: Feedback,
+    attachment: FeedbackAttachment,
+    e: React.MouseEvent
+  ) => {
+    e.stopPropagation();
+    if (downloadingAttachmentId) return;
+
+    try {
+      setDownloadingAttachmentId(attachment.id);
+      const { blob, filename } = await downloadFeedbackAttachment(appId, feedback.id, attachment.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename || attachment.file_name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download attachment:', err);
+    } finally {
+      setDownloadingAttachmentId(null);
     }
   };
 
@@ -130,6 +168,29 @@ export function FeedbackCard({ feedbacks, appId, onFeedbackDeleted }: FeedbackCa
             </span>
           </div>
         </div>
+
+        {feedback.attachments && feedback.attachments.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {feedback.attachments.map((attachment) => (
+              <button
+                key={attachment.id}
+                onClick={(e) => handleDownloadAttachment(feedback, attachment, e)}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2 py-1 text-xs text-neutral-500 transition-colors hover:border-neutral-300 hover:text-neutral-800 disabled:opacity-50"
+                disabled={downloadingAttachmentId === attachment.id}
+                title="下载附件"
+              >
+                <Paperclip className="h-3 w-3 flex-shrink-0" />
+                <span className="max-w-40 truncate">{attachment.file_name}</span>
+                <span className="flex-shrink-0 text-neutral-300">{formatFileSize(attachment.file_size)}</span>
+                {downloadingAttachmentId === attachment.id ? (
+                  <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
+                ) : (
+                  <Download className="h-3 w-3 flex-shrink-0" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Action buttons */}
         <div

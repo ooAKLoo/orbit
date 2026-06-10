@@ -46,6 +46,20 @@ CREATE TABLE IF NOT EXISTS feedbacks (
     FOREIGN KEY (app_id) REFERENCES applications(app_id)
 );
 
+-- 反馈附件表
+CREATE TABLE IF NOT EXISTS feedback_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feedback_id INTEGER NOT NULL,
+    app_id TEXT NOT NULL,
+    object_key TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    file_type TEXT,
+    file_size INTEGER NOT NULL,
+    created_at INTEGER DEFAULT (unixepoch()),
+    FOREIGN KEY (feedback_id) REFERENCES feedbacks(id),
+    FOREIGN KEY (app_id) REFERENCES applications(app_id)
+);
+
 -- 用户表
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,6 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_events_query ON events(app_id, event, timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_distinct ON events(app_id, distinct_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_versions_app_platform ON versions(app_id, platform, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_feedbacks_app ON feedbacks(app_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_attachments_feedback ON feedback_attachments(app_id, feedback_id);
 CREATE INDEX IF NOT EXISTS idx_users_token ON users(auth_token);
 
 -- ALTER TABLE applications ADD COLUMN user_id TEXT REFERENCES users(user_id);

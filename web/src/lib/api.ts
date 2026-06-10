@@ -54,12 +54,22 @@ export interface AppStats {
   retention: RetentionStats;
 }
 
+export interface FeedbackAttachment {
+  id: number;
+  feedback_id: number;
+  file_name: string;
+  file_type: string | null;
+  file_size: number;
+  created_at: number;
+}
+
 export interface Feedback {
   id: number;
   content: string;
   contact: string | null;
   device_info: string | null;
   created_at: number;
+  attachments?: FeedbackAttachment[];
 }
 
 export interface Version {
@@ -81,8 +91,7 @@ export class ApiError extends Error {
   }
 }
 
-// Fetch helper
-async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+function getAuthHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -91,10 +100,15 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     headers['Authorization'] = `Bearer ${_authToken}`;
   }
 
+  return headers;
+}
+
+// Fetch helper
+async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      ...headers,
+      ...getAuthHeaders(),
       ...options?.headers,
     },
   });
@@ -157,6 +171,48 @@ export async function getAppFeedbacks(
 
 export async function deleteFeedback(appId: string, feedbackId: number): Promise<void> {
   await fetchApi(`/admin/apps/${appId}/feedbacks/${feedbackId}`, { method: 'DELETE' });
+}
+
+export async function downloadFeedbackAttachment(
+  appId: string,
+  feedbackId: number,
+  attachmentId: number
+): Promise<{ blob: Blob; filename: string }> {
+  const res = await fetch(
+    `${API_BASE}/admin/apps/${appId}/feedbacks/${feedbackId}/attachments/${attachmentId}`,
+    { headers: getAuthHeaders() }
+  );
+
+  if (!res.ok) {
+    let message = 'Failed to download attachment';
+    try {
+      const data = await res.json();
+      message = data.error || message;
+    } catch {
+      // Ignore non-JSON error bodies.
+    }
+    throw new ApiError(res.status, message);
+  }
+
+  return {
+    blob: await res.blob(),
+    filename: getFilenameFromContentDisposition(res.headers.get('Content-Disposition')) || 'attachment',
+  };
+}
+
+function getFilenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+
+  const encoded = header.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded;
+    }
+  }
+
+  return header.match(/filename="?([^";]+)"?/i)?.[1] || null;
 }
 
 // ============ Versions API ============

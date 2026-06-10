@@ -34,9 +34,17 @@ export interface UpdateInfo {
   forceUpdate?: boolean;
 }
 
+export type FeedbackAttachmentInput = File | Blob | {
+  file: Blob;
+  filename?: string;
+  contentType?: string;
+};
+
 export interface FeedbackOptions {
   content: string;
   contact?: string;
+  /** Optional files submitted with feedback. Total upload size is limited by the API. */
+  attachments?: FeedbackAttachmentInput[];
 }
 
 interface EventPayload {
@@ -227,22 +235,17 @@ class OrbitSDK {
       return false;
     }
 
-    const payload = {
-      content: options.content,
-      contact: options.contact,
-      device_info: {
-        platform: this.getPlatform(),
-        app_version: this.getAppVersion(),
-        distinct_id: this.distinctId,
-      },
+    const deviceInfo = {
+      platform: this.getPlatform(),
+      app_version: this.getAppVersion(),
+      distinct_id: this.distinctId,
     };
+    const attachments = options.attachments?.filter(Boolean) ?? [];
 
     try {
-      const response = await fetch(`${this.endpoint}/v1/${this.appId}/feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const response = attachments.length > 0
+        ? await this.sendFeedbackFormData(options, deviceInfo, attachments)
+        : await this.sendFeedbackJson(options, deviceInfo);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -254,6 +257,60 @@ class OrbitSDK {
       this.log('Failed to submit feedback:', error);
       return false;
     }
+  }
+
+  private sendFeedbackJson(
+    options: FeedbackOptions,
+    deviceInfo: { platform: string; app_version: string; distinct_id: string | null }
+  ): Promise<Response> {
+    return fetch(`${this.endpoint}/v1/${this.appId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content: options.content,
+        contact: options.contact,
+        device_info: deviceInfo,
+      }),
+    });
+  }
+
+  private sendFeedbackFormData(
+    options: FeedbackOptions,
+    deviceInfo: { platform: string; app_version: string; distinct_id: string | null },
+    attachments: FeedbackAttachmentInput[]
+  ): Promise<Response> {
+    const formData = new FormData();
+    formData.append('content', options.content);
+    if (options.contact) {
+      formData.append('contact', options.contact);
+    }
+    formData.append('device_info', JSON.stringify(deviceInfo));
+
+    for (const attachment of attachments) {
+      const { file, filename } = this.normalizeFeedbackAttachment(attachment);
+      formData.append('attachments', file, filename);
+    }
+
+    return fetch(`${this.endpoint}/v1/${this.appId}/feedback`, {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  private normalizeFeedbackAttachment(attachment: FeedbackAttachmentInput): { file: Blob; filename: string } {
+    if (attachment instanceof File) {
+      return { file: attachment, filename: attachment.name };
+    }
+
+    if (attachment instanceof Blob) {
+      return { file: attachment, filename: 'attachment' };
+    }
+
+    const file = attachment.contentType && !attachment.file.type
+      ? new Blob([attachment.file], { type: attachment.contentType })
+      : attachment.file;
+
+    return { file, filename: attachment.filename || 'attachment' };
   }
 
   // ==========================================================================
