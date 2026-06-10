@@ -12,6 +12,8 @@
 export interface OrbitConfig {
   appId: string;
   endpoint?: string;
+  /** Optional endpoint for feedback requests with attachments. Defaults to a file-capable endpoint. */
+  attachmentEndpoint?: string;
   /** Force use China endpoint (Tencent Cloud Function) */
   forceChina?: boolean;
   /** Enable debug logging (default: false) */
@@ -100,6 +102,7 @@ class Storage {
 class OrbitSDK {
   private appId: string | null = null;
   private endpoint = ENDPOINT_GLOBAL;
+  private attachmentEndpoint: string | null = null;
   private distinctId: string | null = null;
   private enableLogging = false;
   private autoTrack = true;
@@ -133,6 +136,7 @@ class OrbitSDK {
     this.appId = config.appId;
     this.enableLogging = config.enableLogging ?? false;
     this.autoTrack = config.autoTrack ?? true;
+    this.attachmentEndpoint = config.attachmentEndpoint ?? null;
 
     // Determine endpoint: explicit > forceChina > auto-detect
     if (config.endpoint) {
@@ -243,9 +247,10 @@ class OrbitSDK {
     const attachments = options.attachments?.filter(Boolean) ?? [];
 
     try {
+      const endpoint = this.getFeedbackEndpoint(attachments.length > 0);
       const response = attachments.length > 0
-        ? await this.sendFeedbackFormData(options, deviceInfo, attachments)
-        : await this.sendFeedbackJson(options, deviceInfo);
+        ? await this.sendFeedbackFormData(endpoint, options, deviceInfo, attachments)
+        : await this.sendFeedbackJson(endpoint, options, deviceInfo);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
@@ -260,10 +265,11 @@ class OrbitSDK {
   }
 
   private sendFeedbackJson(
+    endpoint: string,
     options: FeedbackOptions,
     deviceInfo: { platform: string; app_version: string; distinct_id: string | null }
   ): Promise<Response> {
-    return fetch(`${this.endpoint}/v1/${this.appId}/feedback`, {
+    return fetch(`${endpoint}/v1/${this.appId}/feedback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -275,6 +281,7 @@ class OrbitSDK {
   }
 
   private sendFeedbackFormData(
+    endpoint: string,
     options: FeedbackOptions,
     deviceInfo: { platform: string; app_version: string; distinct_id: string | null },
     attachments: FeedbackAttachmentInput[]
@@ -291,10 +298,29 @@ class OrbitSDK {
       formData.append('attachments', file, filename);
     }
 
-    return fetch(`${this.endpoint}/v1/${this.appId}/feedback`, {
+    return fetch(`${endpoint}/v1/${this.appId}/feedback`, {
       method: 'POST',
       body: formData,
     });
+  }
+
+  private getFeedbackEndpoint(hasAttachments: boolean): string {
+    if (!hasAttachments) {
+      return this.endpoint;
+    }
+
+    if (this.attachmentEndpoint) {
+      return this.attachmentEndpoint;
+    }
+
+    // The China endpoint currently accepts JSON feedback only. Keep attachment
+    // uploads transparent for SDK users by routing files to the file-capable endpoint.
+    if (this.endpoint === ENDPOINT_CHINA) {
+      this.log('China endpoint does not support attachments yet; using global file endpoint');
+      return ENDPOINT_GLOBAL;
+    }
+
+    return this.endpoint;
   }
 
   private normalizeFeedbackAttachment(attachment: FeedbackAttachmentInput): { file: Blob; filename: string } {
