@@ -74,17 +74,17 @@ export default {
     try {
       // Client APIs: /v1/{app_id}/...
       if (path.startsWith('/v1/')) {
-        return handleClientAPI(request, env, path);
+        return await handleClientAPI(request, env, path);
       }
 
       // Management APIs: /manage/...
       if (path.startsWith('/manage/')) {
-        return handleManageAPI(request, env, path, url);
+        return await handleManageAPI(request, env, path, url);
       }
 
       // Admin APIs: /admin/... (for dashboard)
       if (path.startsWith('/admin/')) {
-        return handleAdminAPI(request, env, path, url);
+        return await handleAdminAPI(request, env, path, url);
       }
 
       // Health check
@@ -406,7 +406,14 @@ function getFormString(value: unknown): string | undefined {
 }
 
 function isUploadedFile(value: unknown): value is File {
-  return value instanceof File && value.size > 0;
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const file = value as { size?: unknown; name?: unknown; stream?: unknown };
+  return typeof file.size === 'number' && file.size > 0
+    && typeof file.name === 'string'
+    && typeof file.stream === 'function';
 }
 
 function parseDeviceInfo(value: string | undefined): object | undefined {
